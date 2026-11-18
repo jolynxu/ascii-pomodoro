@@ -7,14 +7,14 @@ what's playing in Spotify and lets you control it with your keyboard.
 ## Run
 
 ```bash
-python3 focus.py
+python3 ascii_pomodoro.py
 ```
 
 Change the session lengths for one run:
 
 ```bash
-python3 focus.py --focus 50 --break 10
-python3 focus.py --focus 0.2 --break 0.1   # quick test: 12s focus, 6s break
+python3 ascii_pomodoro.py --focus 50 --break 10
+python3 ascii_pomodoro.py --focus 0.2 --break 0.1   # quick test: 12s focus, 6s break
 ```
 
 ## Keys
@@ -68,11 +68,3 @@ The timer talks to the Spotify desktop app on your Mac through AppleScript.
 No API key, login or Premium needed. Open Spotify and the current song
 appears at the bottom of the screen. The timer never opens Spotify by itself.
 
-## Files
-
-| File          | What's in it                                             |
-|---------------|----------------------------------------------------------|
-| `focus.py`    | The timer, keyboard controls and screen layout           |
-| `scene.py`    | The space background (planet, moon, stars)               |
-| `mac.py`      | macOS pieces: listing/quitting apps, notifications, Spotify |
-| `config.json` | Your settings and blocklist                              |
