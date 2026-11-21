@@ -29,6 +29,7 @@ import random
 import os
 import select
 import shutil
+import signal
 import sys
 import threading
 import time
@@ -45,6 +46,9 @@ FPS = 20
 CLEAR, HOME, RESET = "\033[2J", "\033[H", "\033[0m"
 WRAP_OFF, WRAP_ON = "\033[?7l", "\033[?7h"   # lets us draw on the very last row
 HIDE_CURSOR, SHOW_CURSOR = "\033[?25l", "\033[?25h"
+# The alternate screen (like vim or less use): nothing drawn there ends up in
+# the scrollback, and leaving it puts the terminal back exactly as it was.
+ALT_SCREEN_ON, ALT_SCREEN_OFF = "\033[?1049h", "\033[?1049l"
 
 PHASES = {                            # label, color
     "focus": ("FOCUS", (110, 195, 255)),
@@ -242,7 +246,8 @@ class App:
         self.switched_at = -10.0
         self.glow = True
         self.renderer = Renderer(truecolor)
-        self.spotify = None          # (state, track, artist) or None
+        self.spotify = None          # what Spotify is playing (a dict) or None
+        self.eq, self.eq_peak = [], []   # equalizer bar heights
         self.toasts = []             # (message, expires_at)
         self.closed = 0              # apps closed by the blocklist this run
         self.alert = None            # [app names, started_at] for the warning popup
@@ -327,6 +332,13 @@ class App:
             t.remaining = t.length()
         elif key in ("p", "n", "b"):
             command = {"p": "playpause", "n": "next track", "b": "previous track"}[key]
+            sp = self.spotify
+            if key == "p" and sp and sp["state"] in ("playing", "paused"):   # flip it now,
+                now = time.time()                                          # don't wait a second
+                if sp["state"] == "playing":
+                    sp["position"] += now - sp["at"]
+                self.spotify = dict(sp, state="paused" if sp["state"] == "playing" else "playing",
+                                    at=now)
             threading.Thread(target=mac.spotify_command, args=(command,), daemon=True).start()
         elif key in ("right", "]", "."):
             self.set_scene(self.scene_index + 1)
@@ -492,27 +504,7 @@ class App:
         cv.glow(rx + len(name) + 3 + self.scene_index, row, accent, 1, 0.3)
 
         # now playing, left-aligned
-        room = max(0, rx - 10)
-        x = 2
-        if self.spotify:
-            state, track, artist = self.spotify
-            playing = state == "playing"
-            for i in range(4):   # little equalizer
-                level = 0.5 + 0.5 * math.sin(t * (4.5 + i * 1.7) + i * 1.3) if playing else 0
-                cv.put(x + i, row, "▁▂▃▄▅▆▇"[int(level * 6)],
-                       lerp((40, 120, 70), (30, 230, 110), level) if playing else (70, 90, 80))
-            if playing:
-                cv.glow(x + 1.5, row, (30, 215, 96), 1.2, 0.25)
-            x += 6
-            song = f"{track}  ·  {artist}"
-            if len(song) > room:
-                song = song[:max(0, room - 1)] + "…"
-            cut = min(len(song), len(track))
-            dim = 1.0 if playing else 0.55
-            cv.text(x - 1, row, " " + song[:cut], scale((235, 235, 245), dim))
-            cv.text(x + cut, row, song[cut:] + " ", scale((140, 140, 165), dim))
-        else:
-            cv.text(x, row, "♪  spotify isn't open "[:room + 8], (95, 95, 120))
+        self.draw_spotify(cv, t, row, max(0, rx - 4))
 
         if not self.show_keys:
             return
@@ -532,6 +524,105 @@ class App:
             cv.text(x, h - 1, key, key_col)
             cv.text(x + len(key) + 1, h - 1, label, (105, 105, 128))
             x += len(key) + len(label) + 4
+
+    def draw_spotify(self, cv, t, row, room):
+        """Now playing: a bouncing equalizer next to the song, artist and a
+        progress bar. Three rows tall, ending on `row`."""
+        sp = self.spotify
+        x = 2
+        if not sp:
+            cv.text(x, row, "♪  spotify isn't open "[:room + 8], (95, 95, 120))
+            return
+        playing = sp["state"] == "playing"
+        GREEN, TEAL = (30, 215, 96), (60, 225, 200)
+        if room < 24 or cv.h < 18:                           # tiny window: a one-row mini version
+            for i in range(min(4, room)):
+                level = 0.5 + 0.5 * math.sin(t * (4.5 + i * 1.7) + i * 1.3) if playing else 0
+                cv.put(x + i, row, "▁▂▃▄▅▆▇"[int(level * 6)],
+                       lerp((40, 120, 70), GREEN, level) if playing else (70, 90, 80))
+            return
+        top = row - 2
+        card = min(room, 56)
+        cv.soft_shade(x + card / 2, top + 1, card / 2 + 6, 3.2, 0.55)
+        cv.dim_rect(x - 1, top, card + 1, 3, 1.0)           # clear stars out from behind it
+
+        # the equalizer: 7 bars, 3 rows tall, thumping along to a beat
+        beat = math.exp(-((t * 2.0) % 1.0) * 5)          # a kick about twice a second
+        if len(self.eq) != 7:
+            self.eq, self.eq_peak = [0.0] * 7, [0.0] * 7
+        for i in range(7):
+            if playing:
+                wobble = 0.5 + 0.5 * math.sin(t * (3.1 + i * 1.37) + i * 2.1)
+                wobble2 = 0.5 + 0.5 * math.sin(t * (7.3 - i * 0.6) + i)
+                target = (0.04 + 0.45 * wobble + 0.18 * wobble2
+                          + 0.4 * beat * (1 - abs(i - 3) / 4.5))
+            else:
+                target = 0.06
+            ease = 0.5 if target > self.eq[i] else 0.2        # jump up fast, settle slower
+            self.eq[i] += (min(1.0, target) - self.eq[i]) * ease
+            self.eq_peak[i] = max(self.eq[i], self.eq_peak[i] - 0.015)
+            eighths = int(self.eq[i] * 24)
+            peak = int(self.eq_peak[i] * 24)
+            col = lerp(GREEN, TEAL, i / 6) if playing else (70, 95, 82)
+            bx = x + i * 2
+            for r in range(3):                                # r = 0 is the bottom row
+                e = max(0, min(8, eighths - r * 8))
+                y = row - r
+                if e:
+                    cv.put(bx, y, " ▁▂▃▄▅▆▇█"[e], lerp(col, (220, 255, 235), 0.35 * r / 2))
+                elif playing and peak // 8 == r and peak > eighths + 1:
+                    cv.put(bx, y, "▁", lerp(col, (255, 255, 255), 0.5))   # falling peak marker
+        if playing:
+            cv.glow(x + 6, row - 0.5, GREEN, 3, 0.18 + 0.25 * beat)
+
+        # song, artist and album
+        tx = x + 16
+        width = max(0, min(room - 16, 40))
+        if width < 6:
+            return
+        dim = 1.0 if playing else 0.6
+        if sp["state"] == "stopped":
+            cv.text(tx, top, "spotify is open", scale((220, 220, 235), dim))
+            cv.text(tx, top + 1, "press p to play", (120, 120, 145))
+            return
+        icon = "▶" if playing else "❚❚"
+        tw = width - len(icon) - 1
+        title = sp["track"]
+        if len(title) > tw:
+            if playing:                                       # scroll long titles
+                loop = title + "   ·   "
+                step = int(t * 4) % len(loop)
+                title = (loop + loop)[step:step + tw]
+            else:
+                title = title[:tw - 1] + "…"
+        cv.text(tx, top, icon, GREEN if playing else (150, 150, 165))
+        cv.text(tx + len(icon) + 1, top, title, scale((240, 240, 250), dim))
+        sub = sp["artist"] + (f"  ·  {sp['album']}" if sp["album"] else "")
+        if len(sub) > width:
+            sub = sub[:width - 1] + "…"
+        cut = min(len(sub), len(sp["artist"]))
+        cv.text(tx, top + 1, sub[:cut], scale((190, 175, 225), dim))
+        cv.text(tx + cut, top + 1, sub[cut:], scale((120, 120, 150), dim))
+
+        # progress bar with a glowing head, and the time
+        dur = sp["duration"]
+        pos = sp["position"] + (time.time() - sp["at"] if playing else 0)
+        pos = max(0.0, min(dur, pos))
+        clock = f"{int(pos) // 60}:{int(pos) % 60:02d} / {int(dur) // 60}:{int(dur) % 60:02d}"
+        if width - len(clock) - 1 < 6:                         # no room for the time
+            clock = ""
+        bar = width - len(clock) - 1 if clock else width
+        done = int(bar * pos / dur) if dur else 0
+        for k in range(bar):
+            if k < done:
+                cv.put(tx + k, row, "━", scale(lerp(GREEN, TEAL, k / bar), 0.65 + 0.35 * dim))
+            else:
+                cv.put(tx + k, row, "─", (70, 70, 92))
+        head = tx + min(done, bar - 1)
+        cv.put(head, row, "●", (230, 255, 240) if playing else (160, 170, 165))
+        if playing:
+            cv.glow(head, row, GREEN, 1.3, 0.35 + 0.3 * beat)
+        cv.text(tx + bar + 1, row, clock, (125, 125, 150))
 
     def draw_tracker(self, cv, y, color, t, pulse):
         """Focus sessions as a row of orbs joined by a path, ending in a star
@@ -707,12 +798,58 @@ def main():
         import termios
         import tty
         old_settings = termios.tcgetattr(fd)
-        tty.setcbreak(fd)  # read keys instantly, without Enter
 
-    sys.stdout.write(CLEAR + HIDE_CURSOR + WRAP_OFF)
+    def enter_screen():
+        if interactive:
+            tty.setcbreak(fd)  # read keys instantly, without Enter
+        sys.stdout.write(ALT_SCREEN_ON + CLEAR + HIDE_CURSOR + WRAP_OFF)
+        sys.stdout.flush()
+        app.renderer.reset()
+
+    def leave_screen():
+        if interactive:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        try:
+            sys.stdout.write(RESET + WRAP_ON + SHOW_CURSOR + ALT_SCREEN_OFF)
+            sys.stdout.flush()
+        except OSError:        # the window is already gone
+            pass
+
+    # Signal handlers only leave a note: the main loop acts on it between
+    # frames, so a half-written frame never gets mixed up with the clean-up.
+    pending = set()
+
+    def on_signal(signum, frame):
+        pending.add("suspend" if signum == signal.SIGTSTP else "close")
+
+    def suspend():
+        """ctrl+z: hand the terminal back cleanly, pick up again on `fg`."""
+        was_playing = app.ambient.on
+        app.ambient.stop()
+        leave_screen()
+        signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTSTP)          # actually stop here...
+        signal.signal(signal.SIGTSTP, on_signal)      # ...and carry on after `fg`
+        enter_screen()
+        if was_playing:
+            app.ambient.start()
+
+    # closing the tab/window (SIGHUP), `kill` (SIGTERM), ctrl+c (SIGINT) and
+    # ctrl+\ (SIGQUIT) all go through the same clean-up as pressing q
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGINT):
+        signal.signal(sig, on_signal)
+    if interactive:
+        signal.signal(signal.SIGTSTP, on_signal)
+    enter_screen()
     start = last = time.monotonic()
     try:
         while True:
+            if "close" in pending:
+                break
+            if "suspend" in pending:
+                pending.discard("suspend")
+                suspend()
+                last = time.monotonic()               # don't count the time spent stopped
             now = time.monotonic()
             app.timer.tick(now - last)
             last = now
@@ -727,13 +864,20 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGINT):
+            signal.signal(sig, signal.SIG_IGN)   # don't get interrupted while tidying up
         app.ambient.stop()
-        if interactive:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        try:
+            sys.stdout.write(app.padding.restore())
+        except OSError:
+            pass
+        leave_screen()
         if app.fullscreen_by_us:   # put the window back how we found it
             mac.set_fullscreen(False)
-        sys.stdout.write(app.padding.restore() + RESET + WRAP_ON + SHOW_CURSOR + CLEAR + HOME)
-        print(f"Focus sessions completed: {app.timer.completed}")
+        try:
+            print(f"Focus sessions completed: {app.timer.completed}")
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

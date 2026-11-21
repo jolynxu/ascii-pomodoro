@@ -148,5 +148,6 @@ Automation**, find your terminal app, and turn them back on.
 ## spotify
 
 talks to the spotify desktop app through AppleScript, so you don't need an api
-key, a login or premium. if spotify's open, the current song shows at the
-bottom. it won't ever open spotify for you.
+key, a login or premium. if spotify's open, a now-playing card sits in the
+bottom left: a bouncing equalizer, the song (long titles scroll), the artist
+and album, and a progress bar with the time. it won't ever open spotify for you.
