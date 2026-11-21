@@ -27,8 +27,8 @@ HEAT = [(0.0, (40, 4, 0)), (0.3, (200, 50, 10)), (0.55, (255, 140, 30)),
 
 def layout(cv):
     """Centre point and half-height of the space below the clock."""
-    top = min(12, cv.h * 0.45)
-    bottom = cv.h - 2
+    top = min(13, cv.h * 0.45)
+    bottom = cv.h - 2.5
     return cv.w / 2, (top + bottom) / 2, (bottom - top) / 2
 
 
@@ -85,8 +85,11 @@ STAR_COLORS = [(170, 190, 255), (210, 220, 255), (255, 255, 255),
 
 
 class Stars:
-    def __init__(self, count=160, brightness=1.0):
+    """Twinkling background stars, plus the odd shooting star."""
+
+    def __init__(self, count=160, brightness=1.0, meteors=0.012):
         self.brightness = brightness
+        self.shooting = ShootingStars(meteors)
         self.stars = [(random.random(), random.random(), random.uniform(0.8, 4),
                        random.uniform(0, TAU), random.random() ** 4,
                        random.choice(STAR_COLORS)) for _ in range(count)]
@@ -100,6 +103,7 @@ class Stars:
             cv.put(px, py, ch, scale(col, min(1.0, b)))
             if mag > 0.35:
                 cv.glow(px, py, col, 1.2, 0.18 * b)
+        self.shooting.draw(cv)
 
 
 class ShootingStars:
@@ -143,12 +147,10 @@ class RingedPlanet:
 
     def __init__(self):
         self.stars = Stars(150)
-        self.shooting = ShootingStars()
 
     def draw(self, cv, t):
         space_gradient(cv)
         self.stars.draw(cv, t)
-        self.shooting.draw(cv)
 
         cx, cy, half = layout(cv)
         R = max(2.5, min(half * 0.42, cv.w / ASPECT * 0.1))
@@ -695,14 +697,12 @@ class Comet:
     name = "Comet"
 
     def __init__(self):
-        self.stars = Stars(150)
-        self.shooting = ShootingStars(0.02)
+        self.stars = Stars(150, meteors=0.02)
         self.dust = []   # [x, y, dx, dy, life]
 
     def draw(self, cv, t):
         space_gradient(cv, (1, 2, 10), (5, 3, 15))
         self.stars.draw(cv, t)
-        self.shooting.draw(cv)
         cx, cy, half = layout(cv)
         hx = cv.w * 0.27 + math.sin(t * 0.1) * 3
         hy = cy + half * 0.3 + math.sin(t * 0.13)

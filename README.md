@@ -18,6 +18,7 @@ no installs, just python 3. some other ways to start it:
 ```bash
 python3 ascii_pomodoro.py --focus 50 --break 10    # longer sessions, just for this run
 python3 ascii_pomodoro.py --scene comet            # start on a specific background
+python3 ascii_pomodoro.py --fullscreen             # go full screen right away
 python3 ascii_pomodoro.py --focus 0.2 --break 0.1  # 12s focus / 6s break, good for testing
 ```
 
@@ -53,6 +54,8 @@ if it feels laggy, `g` turns the glow off.
 - `space` start / pause
 - `s` skip to the next session
 - `r` restart the current session
+- `x` turn the app blocker on / off
+- `f` full screen on / off
 - `q` quit
 
 **backgrounds**
@@ -61,6 +64,7 @@ if it feels laggy, `g` turns the glow off.
 - `1`–`9`, `0` jump to one
 - `g` glow on / off
 - `c` switch between 24-bit and 256 colors
+- `h` hide the key hints at the bottom (press again to bring them back)
 
 **spotify**
 
@@ -72,6 +76,11 @@ the row of dots under the timer is your progress toward a long break. finished
 sessions light up, the one you're on fills in as time goes by, and the little
 star at the end lights up when you've earned the long break.
 
+under that it says *blocking 7 apps* while you're focusing (or *app blocker off*
+if you've turned it off with `x`). when it closes something, a warning pops up
+in the middle of the screen and the edges flash red, so you know why your app
+just disappeared.
+
 ## settings
 
 everything lives in `config.json`:
@@ -79,12 +88,14 @@ everything lives in `config.json`:
 | setting                      | what it does                                     |
 |------------------------------|--------------------------------------------------|
 | `scene`                      | which background to start on                     |
+| `fullscreen`                 | go full screen when it starts                    |
 | `focus_minutes`              | how long a focus session is                      |
 | `short_break_minutes`        | how long a short break is                        |
 | `long_break_minutes`         | how long a long break is                         |
 | `sessions_before_long_break` | focus sessions before you get a long break       |
 | `auto_start_breaks`          | start the break right away when focus ends       |
 | `auto_start_focus`           | start focusing right away when a break ends      |
+| `block_apps`                 | turn the app blocker on or off (`x` also does it) |
 | `blocklist`                  | apps that get closed while you're focusing       |
 
 ### the blocklist
@@ -107,6 +118,11 @@ never closed, even if you put them on the list by accident.
 the first time you run it, macOS will ask things like *"Terminal wants access to
 control System Events"* or *"...to control Discord"*. click **OK** / **Allow** on
 all of them, otherwise the blocklist and spotify stuff won't work.
+
+full screen (`f`) needs one more: **System Settings → Privacy & Security →
+Accessibility**, then switch on your terminal app. if it's not allowed yet, the
+timer tells you. ctrl+cmd+f always works too. if the timer put the window in
+full screen, it takes it back out when you quit.
 
 hit **Don't Allow** by accident? go to **System Settings → Privacy & Security →
 Automation**, find your terminal app, and turn them back on.

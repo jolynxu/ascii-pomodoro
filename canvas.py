@@ -129,6 +129,16 @@ class Canvas:
                 self.bg[i] *= k
                 self.bb[i] *= k
 
+    def dim_row(self, y, k):
+        """Darken a whole row, art and all (for fading under the bottom bar)."""
+        if not 0 <= y < self.h:
+            return
+        a, b = y * self.w, (y + 1) * self.w
+        self.br[a:b] = [v * k for v in self.br[a:b]]
+        self.bg[a:b] = [v * k for v in self.bg[a:b]]
+        self.bb[a:b] = [v * k for v in self.bb[a:b]]
+        self.fg[a:b] = [pack(scale(unpack(c), k)) for c in self.fg[a:b]]
+
     def fade(self, k):
         """Darken everything (used for fading scenes in)."""
         self.br = [v * k for v in self.br]

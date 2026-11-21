@@ -53,6 +53,34 @@ def quit_app(name):
     return _osascript(f'tell application "{safe}" to quit') is not None
 
 
+# ------------------------------------------------------------ full screen
+
+def set_fullscreen(on=None):
+    """Put the frontmost window (your terminal) in or out of macOS full screen.
+    on=None flips it. Returns the new state (True/False), or an error message
+    string if it didn't work."""
+    target = "not fs" if on is None else ("true" if on else "false")
+    script = ('tell application "System Events"\n'
+              '  tell front window of (first application process whose frontmost is true)\n'
+              '    set fs to value of attribute "AXFullScreen"\n'
+              f'    set target to {target}\n'
+              '    set value of attribute "AXFullScreen" to target\n'
+              '    return target\n'
+              '  end tell\n'
+              'end tell')
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True,
+                                text=True, timeout=3)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "full screen only works on a mac"
+    if result.returncode != 0:
+        if "assistive" in result.stderr or "-25211" in result.stderr or "-1719" in result.stderr:
+            return ("full screen needs your terminal turned on in System Settings > "
+                    "Privacy & Security > Accessibility")
+        return "couldn't switch to full screen (try ctrl+cmd+f)"
+    return result.stdout.strip() == "true"
+
+
 # ------------------------------------------------------------ alerts
 
 def notify(title, message):
