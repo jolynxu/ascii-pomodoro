@@ -55,30 +55,43 @@ def quit_app(name):
 
 # ------------------------------------------------------------ full screen
 
-def set_fullscreen(on=None):
-    """Put the frontmost window (your terminal) in or out of macOS full screen.
-    on=None flips it. Returns the new state (True/False), or an error message
-    string if it didn't work."""
-    target = "not fs" if on is None else ("true" if on else "false")
-    script = ('tell application "System Events"\n'
-              '  tell front window of (first application process whose frontmost is true)\n'
-              '    set fs to value of attribute "AXFullScreen"\n'
-              f'    set target to {target}\n'
-              '    set value of attribute "AXFullScreen" to target\n'
-              '    return target\n'
-              '  end tell\n'
-              'end tell')
+def _window_script(body):
+    return ('tell application "System Events"\n'
+            '  tell front window of (first application process whose frontmost is true)\n'
+            f'    {body}\n'
+            '  end tell\n'
+            'end tell')
+
+
+def _run_fullscreen_script(script):
+    """Returns the script's output, or an error message prefixed with '!'."""
     try:
         result = subprocess.run(["osascript", "-e", script], capture_output=True,
                                 text=True, timeout=3)
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "full screen only works on a mac"
+        return "!full screen only works on a mac"
     if result.returncode != 0:
         if "assistive" in result.stderr or "-25211" in result.stderr or "-1719" in result.stderr:
-            return ("full screen needs your terminal turned on in System Settings > "
+            return ("!full screen needs your terminal turned on in System Settings > "
                     "Privacy & Security > Accessibility")
-        return "couldn't switch to full screen (try ctrl+cmd+f)"
-    return result.stdout.strip() == "true"
+        return "!couldn't switch full screen (try ctrl+cmd+f)"
+    return result.stdout.strip()
+
+
+def is_fullscreen():
+    """Is the frontmost window (your terminal) in full screen? True/False, or
+    an error message string."""
+    out = _run_fullscreen_script(_window_script(
+        'return (value of attribute "AXFullScreen") as string'))
+    return out[1:] if out.startswith("!") else out == "true"
+
+
+def set_fullscreen(on):
+    """Put the frontmost window in (on=True) or out of (on=False) full screen.
+    Returns None if it worked, or an error message string."""
+    out = _run_fullscreen_script(_window_script(
+        f'set value of attribute "AXFullScreen" to {"true" if on else "false"}'))
+    return out[1:] if out.startswith("!") else None
 
 
 # ------------------------------------------------------------ alerts

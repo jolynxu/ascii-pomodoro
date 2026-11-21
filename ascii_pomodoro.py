@@ -192,7 +192,9 @@ class App:
         self.closed = 0              # apps closed by the blocklist this run
         self.alert = None            # [app names, started_at] for the warning popup
         self.blocker_changed = -99.0 # when x was last pressed (for the switch effect)
-        self.fullscreen = False      # did we put the window in full screen?
+        self.fullscreen = False      # is the window in full screen right now?
+        self.fullscreen_by_us = False   # did we put it there? (undone on quit)
+        self.fullscreen_busy = threading.Lock()
         self.show_keys = True
         self.now = 0.0
 
@@ -211,13 +213,40 @@ class App:
         self.switched_at = self.now
 
     def toggle_fullscreen(self, on=None):
+        """f: go full screen, or come back out if we already are. on=True/False
+        forces a direction. Runs in the background since macOS animates it."""
         def work():
-            result = mac.set_fullscreen(on)
-            if isinstance(result, str):
-                self.toast(result, 7)
-            else:
-                self.fullscreen = result
-        threading.Thread(target=work, daemon=True).start()
+            state = mac.is_fullscreen()            # ask the window, don't guess
+            if isinstance(state, str):
+                self.toast(state, 7)
+                return
+            target = (not state) if on is None else on
+            if target != state:
+                for _ in range(2):                 # retry once if macOS ignored us
+                    error = mac.set_fullscreen(target)
+                    if error:
+                        self.toast(error, 7)
+                        return
+                    for _ in range(12):            # the animation takes ~1s
+                        time.sleep(0.25)
+                        if mac.is_fullscreen() == target:
+                            break
+                    else:
+                        continue
+                    break
+            self.fullscreen = mac.is_fullscreen() is True
+            if target and not state:
+                self.fullscreen_by_us = True
+            elif not target:
+                self.fullscreen_by_us = False
+
+        def guarded():
+            if self.fullscreen_busy.acquire(blocking=False):   # ignore presses mid-switch
+                try:
+                    work()
+                finally:
+                    self.fullscreen_busy.release()
+        threading.Thread(target=guarded, daemon=True).start()
 
     def app_closed(self, name):
         """Called by the watcher when it quits a blocked app."""
@@ -424,8 +453,9 @@ class App:
         if not self.show_keys:
             return
         # key hints: keys in color, labels gray; drop some if the window is narrow
+        screen = "exit full screen" if self.fullscreen else "full screen"
         hints = [("space", "start/pause"), ("s", "skip"), ("r", "restart"), ("← →", "scene"),
-                 ("g", "glow"), ("x", "blocker"), ("f", "full screen"), ("p n b", "music"),
+                 ("g", "glow"), ("x", "blocker"), ("f", screen), ("p n b", "music"),
                  ("h", "hide keys"),
                  ("q", "quit")]
         while hints and sum(len(k) + len(v) + 4 for k, v in hints) - 3 > w - 4:
@@ -635,7 +665,7 @@ def main():
     finally:
         if interactive:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        if app.fullscreen:   # put the window back how we found it
+        if app.fullscreen_by_us:   # put the window back how we found it
             mac.set_fullscreen(False)
         sys.stdout.write(RESET + SHOW_CURSOR + CLEAR + HOME)
         print(f"Focus sessions completed: {app.timer.completed}")
