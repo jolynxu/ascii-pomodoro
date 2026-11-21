@@ -2,7 +2,7 @@
 
 a pomodoro timer for the mac terminal, except you're floating in space.
 
-pick from 10 animated backgrounds (black holes, comets, eclipses, all that),
+pick from 11 animated backgrounds (black holes, comets, the northern lights, all that),
 and while you're in a focus session it'll quietly close discord and whatever
 else you'd otherwise end up on. it also shows what's playing on spotify so you
 don't have to leave the terminal to skip a song.
@@ -17,19 +17,19 @@ no installs, just python 3. some other ways to start it:
 
 ```bash
 python3 ascii_pomodoro.py --focus 50 --break 10    # longer sessions, just for this run
-python3 ascii_pomodoro.py --scene comet            # start on a specific background
+python3 ascii_pomodoro.py --scene nebula           # start on a specific background
 python3 ascii_pomodoro.py --fullscreen             # go full screen right away
 python3 ascii_pomodoro.py --focus 0.2 --break 0.1  # 12s focus / 6s break, good for testing
 ```
 
 ## the backgrounds
 
-flip through them with the arrow keys, or press the number to jump straight there.
+flip through them with the arrow keys, or press the key to jump straight there.
 
 | key | name        | what it is                                                     |
 |-----|-------------|----------------------------------------------------------------|
 | 1   | `planet`    | ringed gas giant, a little moon going round it                 |
-| 2   | `nebula`    | pink and teal gas clouds with baby stars blinking inside       |
+| 2   | `constellations` | orion, the big dipper and friends, tracing themselves in one at a time |
 | 3   | `blackhole` | black hole eating a glowing disk of gas                        |
 | 4   | `warp`      | stars streaking past at warp speed (it jumps every so often)   |
 | 5   | `galaxy`    | spiral galaxy, slowly turning                                  |
@@ -37,10 +37,18 @@ flip through them with the arrow keys, or press the number to jump straight ther
 | 7   | `orbit`     | earth from orbit: city lights, aurora, a satellite floats by   |
 | 8   | `pulsar`    | spinning neutron star sweeping its beams around like a lighthouse |
 | 9   | `comet`     | comet with a blue ion tail and a dusty gold one                |
-| 0   | `eclipse`   | total solar eclipse, with a diamond ring flash now and then    |
+| 0   | `aurora`    | the northern lights over snowy mountains and a still lake      |
+| -   | `nebula`    | the Eagle Nebula's Pillars of Creation, rimmed with light, in drifting rainbow gas |
 
 keep an eye out on `orbit`: a train of satellites crosses the sky every so
-often, and the big satellite flashes when the sun catches its panels.
+often, and the big satellite flashes when the sun catches its panels. on
+`nebula`, gas boils off the glowing pillar edges, baby stars pulse red inside
+the pillar heads (one shooting out a jet), and every so often a wave of light
+rolls out from the young star cluster.
+
+the art goes right to the edge of the window: the timer also tints the
+terminal's padding to match the scene, and puts your normal background back
+when you quit.
 
 **if the colors look weird or blocky**, press `c` to switch to 256-color mode (or
 start with `--colors 256`). the glow needs a terminal with 24-bit color.
@@ -56,12 +64,13 @@ if it feels laggy, `g` turns the glow off.
 - `r` restart the current session
 - `x` turn the app blocker on / off
 - `f` full screen on / off
+- `a` ambient space sounds on / off
 - `q` quit
 
 **backgrounds**
 
 - `←` `→` (or `[` `]`) previous / next
-- `1`–`9`, `0` jump to one
+- `1`–`9`, `0`, `-` jump to one
 - `g` glow on / off
 - `c` switch between 24-bit and 256 colors
 - `h` hide the key hints at the bottom (press again to bring them back)
@@ -97,6 +106,15 @@ everything lives in `config.json`:
 | `auto_start_focus`           | start focusing right away when a break ends      |
 | `block_apps`                 | turn the app blocker on or off (`x` also does it) |
 | `blocklist`                  | apps that get closed while you're focusing       |
+| `ambient_sound`              | play ambient space sounds (`a` also toggles it)  |
+| `ambient_volume`             | how loud the ambient sounds are, from 0 to 1     |
+
+### ambient sound
+
+a soft space soundtrack: a low drone, drifting solar wind, twinkling chimes
+with long echoes, and the odd far-off radio blip. it's made from scratch the
+first time you turn it on (takes a second or two) and saved in
+`~/Library/Caches/ascii_pomodoro/`, then looped with macOS's built-in `afplay`.
 
 ### the blocklist
 

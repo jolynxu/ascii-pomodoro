@@ -8,6 +8,8 @@
   "auto_start_breaks": true,
   "auto_start_focus": false,
   "block_apps": true,
+  "ambient_sound": true,
+  "ambient_volume": 0.5,
   "blocklist": [
     "Discord",
     "Messages",

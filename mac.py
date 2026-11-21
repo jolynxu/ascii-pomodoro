@@ -94,6 +94,47 @@ def set_fullscreen(on):
     return out[1:] if out.startswith("!") else None
 
 
+# ------------------------------------------------------------ window padding color
+# Terminal.app leaves a few pixels of padding around the text grid, painted in
+# the profile's background color. Matching it to the scene's edges hides the
+# "border". Other terminals understand the standard OSC 11 escape code instead,
+# which the timer writes itself.
+
+def _tab_script(tty, body):
+    return ('tell application "Terminal"\n'
+            '  repeat with w in windows\n'
+            '    repeat with t in tabs of w\n'
+            f'      if tty of t is "{tty}" then\n'
+            f'        {body}\n'
+            '      end if\n'
+            '    end repeat\n'
+            '  end repeat\n'
+            'end tell')
+
+
+def get_tab_background(tty):
+    """The Terminal.app tab's background as an AppleScript color, e.g. '0, 0, 0'."""
+    try:
+        result = subprocess.run(["osascript", "-e", _tab_script(
+            tty, "return background color of t")], capture_output=True, text=True, timeout=3)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    out = result.stdout.strip()
+    return out if result.returncode == 0 and out.count(",") == 2 else None
+
+
+def set_tab_background(tty, color):
+    """color is (r, g, b) 0-255, or a string returned by get_tab_background."""
+    if not isinstance(color, str):
+        color = ", ".join(str(int(max(0, min(255, c))) * 257) for c in color)
+    try:
+        subprocess.run(["osascript", "-e", _tab_script(
+            tty, "set background color of t to {" + color + "}\n        return")],
+            capture_output=True, timeout=3)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
 # ------------------------------------------------------------ alerts
 
 def notify(title, message):

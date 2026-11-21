@@ -9,16 +9,17 @@ Usage:
     python3 ascii_pomodoro.py --focus 50 --break 10
     python3 ascii_pomodoro.py --focus 0.2 --break 0.1   # quick test (12s / 6s)
 
-    python3 ascii_pomodoro.py --scene nebula   # start on a different background
+    python3 ascii_pomodoro.py --scene aurora   # start on a different background
 
 Keys:
     space  start / pause         s  skip to next session
     r      restart this session  q  quit
     p      Spotify play/pause    n  next song    b  previous song
-    left/right or [ ]  change background    1-9, 0  jump to a background
+    left/right or [ ]  change background    1-9, 0, -  jump to a background
     g      glow on/off           c  true color / 256 color
     h      hide / show the key hints
     x      app blocker on/off      f  full screen on/off
+    a      ambient space sounds on/off
 """
 
 import argparse
@@ -33,6 +34,7 @@ import threading
 import time
 
 import mac
+import sound
 from canvas import ASPECT, Canvas, Renderer, lerp, scale, supports_truecolor
 from scenes import SCENES
 
@@ -41,6 +43,7 @@ CONFIG_PATH = os.path.join(HERE, "config.json")
 FPS = 20
 
 CLEAR, HOME, RESET = "\033[2J", "\033[H", "\033[0m"
+WRAP_OFF, WRAP_ON = "\033[?7l", "\033[?7h"   # lets us draw on the very last row
 HIDE_CURSOR, SHOW_CURSOR = "\033[?25l", "\033[?25h"
 
 PHASES = {                            # label, color
@@ -174,6 +177,58 @@ class Watcher(threading.Thread):
                         self.app.app_closed(name)
 
 
+# ---------------------------------------------------------------- window padding
+
+class Padding:
+    """Keeps the strip of padding around the terminal's text grid the same
+    color as the edges of the scene, so the art looks like it goes all the
+    way to the edge of the window instead of sitting inside a border."""
+
+    def __init__(self):
+        self.apple = os.environ.get("TERM_PROGRAM") == "Apple_Terminal"
+        self.tty = None
+        self.original = None     # Terminal.app tab color to put back on quit
+        self.sent = None
+        self.sent_at = -99.0
+        self.busy = threading.Lock()
+        if self.apple:
+            try:
+                self.tty = os.ttyname(sys.stdout.fileno())
+            except OSError:
+                self.apple = False
+
+    def update(self, color, now):
+        """Returns escape codes to write (for terminals that take OSC 11)."""
+        color = tuple(int(min(255, max(0, c))) for c in color)
+        if self.sent and max(abs(a - b) for a, b in zip(color, self.sent)) < 4:
+            return ""
+        if now - self.sent_at < (0.6 if self.apple else 0.1):
+            return ""
+        self.sent, self.sent_at = color, now
+        if not self.apple:
+            return "\033]11;rgb:%02x/%02x/%02x\033\\" % color
+        if self.busy.acquire(blocking=False):   # osascript is slow: do it off-thread
+            def work(color=color):
+                try:
+                    if self.original is None:
+                        self.original = mac.get_tab_background(self.tty) or ""
+                    mac.set_tab_background(self.tty, color)
+                finally:
+                    self.busy.release()
+            threading.Thread(target=work, daemon=True).start()
+        else:
+            self.sent = None   # try again next frame
+        return ""
+
+    def restore(self):
+        if not self.apple:
+            return "\033]111\033\\"
+        with self.busy:
+            if self.original:
+                mac.set_tab_background(self.tty, self.original)
+        return ""
+
+
 # ---------------------------------------------------------------- the app
 
 class App:
@@ -197,6 +252,10 @@ class App:
         self.fullscreen_busy = threading.Lock()
         self.show_keys = True
         self.now = 0.0
+        self.padding = Padding()
+        self.ambient = sound.Ambient(cfg.get("ambient_volume", 0.5), on_message=self.toast)
+        if cfg.get("ambient_sound", True):
+            self.ambient.start()
 
     @property
     def scene(self):
@@ -275,12 +334,17 @@ class App:
             self.set_scene(self.scene_index - 1)
         elif key.isdigit() and (int(key) or 10) <= len(self.scene_names):
             self.set_scene((int(key) or 10) - 1)   # 0 picks the 10th
+        elif key == "-" and len(self.scene_names) >= 11:
+            self.set_scene(10)
         elif key == "x":
             t.block_apps = not t.block_apps
             self.blocker_changed = time.time()
             self.toast("app blocker " + ("on" if t.block_apps else "off"), 2)
         elif key == "f":
             self.toggle_fullscreen()
+        elif key == "a":
+            on = self.ambient.toggle()
+            self.toast("ambient sound " + ("on" if on else "off"), 2)
         elif key == "h":
             self.show_keys = not self.show_keys
         elif key == "g":
@@ -308,7 +372,7 @@ class App:
         main = f"◆  blocking {n} app{'s' if n != 1 else ''}"
         extra = f"  ·  {self.closed} closed" if self.closed else ""
         x0 = (cv.w - len(main + extra)) // 2
-        cv.dim_rect(x0 - 2, y, len(main + extra) + 4, 1, 0.3)
+        cv.dim_rect(x0, y, len(main + extra), 1, 1.0)
         if since < 0.7:   # just switched on: one fast bright sweep
             sweep, boost = since / 0.7 * (len(main) + 6) - 3, 1.0
         else:             # then a shimmer runs across now and then
@@ -327,7 +391,7 @@ class App:
         main, hint = "◇  app blocker off", "  ·  x to turn on"
         text = main + hint
         x0 = (cv.w - len(text)) // 2
-        cv.dim_rect(x0 - 3, y, len(text) + 6, 1, 0.3)
+        cv.dim_rect(x0, y, len(text), 1, 1.0)
         tick = int(t * 14)
         rnd = random.Random(tick)
         glitching = since < 0.8
@@ -455,7 +519,7 @@ class App:
         # key hints: keys in color, labels gray; drop some if the window is narrow
         screen = "exit full screen" if self.fullscreen else "full screen"
         hints = [("space", "start/pause"), ("s", "skip"), ("r", "restart"), ("← →", "scene"),
-                 ("g", "glow"), ("x", "blocker"), ("f", screen), ("p n b", "music"),
+                 ("g", "glow"), ("x", "blocker"), ("f", screen), ("a", "sound"), ("p n b", "music"),
                  ("h", "hide keys"),
                  ("q", "quit")]
         while hints and sum(len(k) + len(v) + 4 for k, v in hints) - 3 > w - 4:
@@ -500,7 +564,7 @@ class App:
             cells.append(("✧", (110, 100, 80), 0))
 
         x0 = (cv.w - len(cells)) // 2
-        cv.dim_rect(x0 - 1, y, len(cells) + 2, 1, 0.25)
+        cv.dim_rect(x0, y, len(cells), 1, 1.0)
         for i, (ch, c, g) in enumerate(cells):
             if g:
                 cv.glow(x0 + i, y, c, 1.5, g)
@@ -510,8 +574,7 @@ class App:
 
     def frame(self, t):
         self.now = t
-        cols, rows = shutil.get_terminal_size((80, 24))
-        rows -= 1  # leave one line so the screen doesn't scroll
+        cols, rows = shutil.get_terminal_size((80, 24))   # every row: autowrap is off
         cv = Canvas(cols, rows)
         cv.glow_on = self.glow
         self.scene.draw(cv, t)
@@ -530,7 +593,7 @@ class App:
         clock = f"{mins:02d}:{secs:02d}"
         width = sum(len(FONT[c][0]) for c in clock) + 2 * (len(clock) - 1)
         x0, y0 = (cols - width) // 2, 2 if rows >= 24 else 1   # a little air above the clock
-        cv.dim_rect(x0 - 3, y0 - 1, width + 6, 10, 0.2)
+        cv.soft_shade(cols / 2, y0 + 4.5, width / 2 + 14, 8, 0.6)   # soft, no box
         light = lerp(color, (255, 255, 255), 0.6)
         shine_x = ((t * 0.35) % 2.5 - 0.5) * width if running else -99  # sweeping shine
 
@@ -568,7 +631,7 @@ class App:
         bar_w = max(10, width)
         filled = int(done * bar_w)
         bx = (cols - bar_w) // 2
-        cv.dim_rect(bx - 1, y0 + 8, bar_w + 2, 1, 0.25)
+        cv.dim_rect(bx, y0 + 8, bar_w, 1, 1.0)
         for i in range(bar_w):
             if i < filled:
                 cv.put(bx + i, y0 + 8, "━", lerp(scale(color, 0.45), light, i / bar_w))
@@ -589,8 +652,9 @@ class App:
             cv.center(y0 + 10, mac.last_error, (255, 95, 95))
 
         self.draw_hud(cv, t, light)
+        pad = self.padding.update(cv.edge_color(), t) if fade >= 1 else ""
         self.draw_alert(cv)
-        return self.renderer.render(cv)
+        return self.renderer.render(cv) + pad
 
 
 # ---------------------------------------------------------------- main loop
@@ -645,7 +709,7 @@ def main():
         old_settings = termios.tcgetattr(fd)
         tty.setcbreak(fd)  # read keys instantly, without Enter
 
-    sys.stdout.write(CLEAR + HIDE_CURSOR)
+    sys.stdout.write(CLEAR + HIDE_CURSOR + WRAP_OFF)
     start = last = time.monotonic()
     try:
         while True:
@@ -663,11 +727,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        app.ambient.stop()
         if interactive:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         if app.fullscreen_by_us:   # put the window back how we found it
             mac.set_fullscreen(False)
-        sys.stdout.write(RESET + SHOW_CURSOR + CLEAR + HOME)
+        sys.stdout.write(app.padding.restore() + RESET + WRAP_ON + SHOW_CURSOR + CLEAR + HOME)
         print(f"Focus sessions completed: {app.timer.completed}")
 
 

@@ -146,6 +146,14 @@ class Canvas:
         self.bb = [v * k for v in self.bb]
         self.fg = [pack(scale(unpack(c), k)) for c in self.fg]
 
+    def edge_color(self):
+        """Average background color around the outside of the screen."""
+        w, h = self.w, self.h
+        idx = list(range(w)) + [i * w for i in range(1, h)] + [i * w + w - 1 for i in range(1, h)]
+        n = len(idx)
+        return (sum(self.br[i] for i in idx) / n, sum(self.bg[i] for i in idx) / n,
+                sum(self.bb[i] for i in idx) / n)
+
     def text(self, x, y, s, color):
         for ch in s:
             wide = unicodedata.east_asian_width(ch) in "WF"
@@ -154,11 +162,29 @@ class Canvas:
                 self.put(x + 1, y, "", color)
             x += 2 if wide else 1
 
-    def center(self, y, s, color, dim=0.25):
+    def center(self, y, s, color, dim=1.0):
         s = s[: max(0, self.w - 2)]
         x = (self.w - len(s)) // 2
-        self.dim_rect(x - 1, y, len(s) + 2, 1, dim)
+        self.dim_rect(x, y, len(s), 1, dim)
         self.text(x, y, s, color)
+
+    def soft_shade(self, cx, cy, rx, ry, k):
+        """Darken an oval area, strongest in the middle and fading to nothing
+        at the edge (so there's no hard box), to keep text readable."""
+        for y in range(max(0, int(cy - ry)), min(self.h, int(cy + ry) + 1)):
+            dy = (y - cy) / ry
+            for x in range(max(0, int(cx - rx)), min(self.w, int(cx + rx) + 1)):
+                dx = (x - cx) / rx
+                d2 = dx * dx + dy * dy
+                if d2 >= 1:
+                    continue
+                f = 1 - k * (1 - d2) ** 1.5
+                i = y * self.w + x
+                self.br[i] *= f
+                self.bg[i] *= f
+                self.bb[i] *= f
+                if self.ch[i] != " ":
+                    self.fg[i] = pack(scale(unpack(self.fg[i]), f * f))
 
 
 # ---------------------------------------------------------------- terminal output
