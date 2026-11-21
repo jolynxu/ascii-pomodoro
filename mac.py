@@ -6,6 +6,7 @@ functions return None or False instead of crashing the timer.
 """
 
 import subprocess
+import time
 
 # Apps the timer will never quit, even if they end up on the blocklist.
 PROTECTED = {"finder", "terminal", "iterm2", "code", "visual studio code",
@@ -150,18 +151,35 @@ def notify(title, message):
 # ------------------------------------------------------------ spotify
 
 def spotify_now_playing():
-    """Return (state, track, artist) from the Spotify app, or None."""
+    """What the Spotify app is playing, as a dict with state ('playing',
+    'paused' or 'stopped'), track, artist, album, position and duration (in
+    seconds) and at (when this was read). None if Spotify can't be reached."""
     out = _osascript(
         'tell application "Spotify"\n'
         '  set s to player state as string\n'
+        '  if s is "stopped" then return s\n'
+        '  set p to player position\n'
+        '  set d to duration of current track\n'
         '  set n to name of current track\n'
         '  set a to artist of current track\n'
-        '  return s & "|" & n & "|" & a\n'
+        '  set al to album of current track\n'
+        '  return s & tab & p & tab & d & tab & n & tab & a & tab & al\n'
         'end tell')
-    if not out or out.count("|") < 2:
+    if not out:
         return None
-    state, track, artist = out.split("|", 2)
-    return state, track, artist
+    parts = out.split("\t")
+    if parts[0] == "stopped" or len(parts) < 6:
+        return {"state": "stopped", "track": "", "artist": "", "album": "",
+                "position": 0.0, "duration": 0.0, "at": time.time()}
+
+    def number(v):
+        try:
+            return float(v.replace(",", "."))   # some regions write 1,5 for 1.5
+        except ValueError:
+            return 0.0
+    return {"state": parts[0], "position": number(parts[1]),
+            "duration": number(parts[2]) / 1000, "track": parts[3],
+            "artist": parts[4], "album": "\t".join(parts[5:]), "at": time.time()}
 
 
 def spotify_command(command):
