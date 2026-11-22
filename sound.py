@@ -36,7 +36,7 @@ import wave
 RATE = 22050          # samples per second (plenty for soft ambient sound)
 LOOP = 60.0           # seconds between loop starts
 FADE = 4.0            # seconds of overlap between one loop and the next
-VERSION = 2           # bump to regenerate the files after changing the sound
+VERSION = 3           # bump to regenerate the files after changing the sound
 N = int((LOOP + FADE) * RATE)
 
 TAU = math.tau
@@ -436,14 +436,27 @@ def make_console(rnd):
     return L, R
 
 
-def soft_key(rnd, weight=1.0):
-    """A quiet laptop key: a short, muffled tap with no clack (deeper and a
-    touch longer for the bigger keys)."""
-    n = sec(0.04)
-    tap = biquad(white(rnd, n), "bp", rnd.uniform(650, 950) / weight, 1.5)
-    tick = biquad(white(rnd, n), "bp", rnd.uniform(2000, 2600), 3)
-    return [2.2 * tap[k] * exp(-k / (0.005 * RATE * weight)) + 0.5 * tick[k] * exp(-k / (0.0012 * RATE))
-            for k in range(n)]
+def clacky_key(rnd, weight=1.0, up=False):
+    """A smooth, creamy mechanical key: a rounded 'clack' from the keycap
+    ringing (pure tones, no gritty noise), a warm thock as it bottoms out,
+    and a softer, higher clack when it comes back up. Bigger keys (weight > 1)
+    sound deeper and last a little longer."""
+    n = sec(0.06)
+    lift = 1.12 if up else 1.0
+    modes = [(rnd.uniform(1700, 2300) * lift / weight ** 0.5, 1.0, 0.007),   # the clack
+             (rnd.uniform(2900, 3700) * lift / weight ** 0.5, 0.45, 0.004),
+             (rnd.uniform(4600, 5400) * lift, 0.15, 0.002)]
+    if not up:
+        modes.append((rnd.uniform(380, 480) / weight, 1.3 * weight, 0.016 * weight))   # the thock
+    out = [0.0] * n
+    for hz, amp, decay in modes:
+        w, d, ph = TAU * hz / RATE, decay * RATE, rnd.uniform(0, TAU)
+        for k in range(n):
+            out[k] += amp * sin(ph + w * k * (1 - 0.04 * k / n)) * exp(-k / d)
+    attack = sec(0.0007)                       # round off the very start: smooth, not sharp
+    for k in range(attack):
+        out[k] *= k / attack
+    return [v * (0.35 if up else 1.0) for v in out]
 
 
 def bell(hz, ring=1.6):
@@ -544,20 +557,28 @@ def make_observatory(rnd):
         L[i] += fxL[i]
         R[i] += fxR[i]
 
-    # gentle typing, dry and close, in unhurried stretches
-    keys = [soft_key(rnd) for _ in range(10)]
-    space = [soft_key(rnd, 1.4) for _ in range(2)]
+    # smooth, clacky typing, dry and close, flowing along in stretches
+    keys = [clacky_key(rnd) for _ in range(10)]
+    ups = [clacky_key(rnd, up=True) for _ in range(5)]
+    space = [clacky_key(rnd, 1.6) for _ in range(2)]
+    space_up = clacky_key(rnd, 1.6, up=True)
+
+    def press(sound, up, t, gain):
+        pan = rnd.uniform(-0.15, 0.25)
+        place(L, R, sound, t, gain * rnd.uniform(0.85, 1.0), pan)
+        place(L, R, up, t + rnd.uniform(0.07, 0.1), gain, pan)
+
     t = FADE + rnd.uniform(0.5, 2)
     while t < LOOP - 3:
         until = min(LOOP - 2, t + rnd.uniform(3, 8))
         while t < until:
             for _ in range(rnd.randint(2, 7)):
-                place(L, R, rnd.choice(keys), t, 0.22 * rnd.uniform(0.7, 1.0), rnd.uniform(-0.15, 0.25))
-                t += max(0.07, rnd.gauss(0.16, 0.05))
-            place(L, R, rnd.choice(space), t, 0.26 * rnd.uniform(0.8, 1.0), 0.0)
-            t += max(0.1, rnd.gauss(0.22, 0.07))
-            if rnd.random() < 0.15:
-                t += rnd.uniform(0.6, 2.0)
+                press(rnd.choice(keys), rnd.choice(ups), t, 0.1)
+                t += max(0.1, rnd.gauss(0.15, 0.022))      # an even, flowing rhythm
+            press(rnd.choice(space), space_up, t, 0.11)
+            t += max(0.14, rnd.gauss(0.19, 0.03))
+            if rnd.random() < 0.1:
+                t += rnd.uniform(0.6, 1.6)
         t += rnd.uniform(3, 8)                                # sit back and think
     return L, R
 
