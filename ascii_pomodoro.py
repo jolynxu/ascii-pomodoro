@@ -15,7 +15,7 @@ Keys:
     space  start / pause         s  skip to next session
     r      restart this session  q  quit
     p      Spotify play/pause    n  next song    b  previous song
-    left/right or [ ]  change background    1-9, 0, -  jump to a background
+    left/right or [ ]  change background    1-9, 0  jump to a background
     g      glow on/off           c  true color / 256 color
     h      hide / show the key hints
     x      app blocker on/off      f  full screen on/off
@@ -346,8 +346,6 @@ class App:
             self.set_scene(self.scene_index - 1)
         elif key.isdigit() and (int(key) or 10) <= len(self.scene_names):
             self.set_scene((int(key) or 10) - 1)   # 0 picks the 10th
-        elif key == "-" and len(self.scene_names) >= 11:
-            self.set_scene(10)
         elif key == "x":
             t.block_apps = not t.block_apps
             self.blocker_changed = time.time()

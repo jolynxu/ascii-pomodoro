@@ -2,7 +2,7 @@
 
 a pomodoro timer for the mac terminal, except you're floating in space.
 
-pick from 11 animated backgrounds (black holes, comets, the northern lights, all that),
+pick from 10 animated backgrounds (black holes, comets, the northern lights, all that),
 and while you're in a focus session it'll quietly close discord and whatever
 else you'd otherwise end up on. it also shows what's playing on spotify so you
 don't have to leave the terminal to skip a song.
@@ -17,7 +17,7 @@ no installs, just python 3. some other ways to start it:
 
 ```bash
 python3 ascii_pomodoro.py --focus 50 --break 10    # longer sessions, just for this run
-python3 ascii_pomodoro.py --scene nebula           # start on a specific background
+python3 ascii_pomodoro.py --scene aurora           # start on a specific background
 python3 ascii_pomodoro.py --fullscreen             # go full screen right away
 python3 ascii_pomodoro.py --focus 0.2 --break 0.1  # 12s focus / 6s break, good for testing
 ```
@@ -38,13 +38,9 @@ flip through them with the arrow keys, or press the key to jump straight there.
 | 8   | `pulsar`    | spinning neutron star sweeping its beams around like a lighthouse |
 | 9   | `comet`     | comet with a blue ion tail and a dusty gold one                |
 | 0   | `aurora`    | the northern lights over snowy mountains and a still lake      |
-| -   | `nebula`    | the Eagle Nebula's Pillars of Creation, rimmed with light, in drifting rainbow gas |
 
 keep an eye out on `orbit`: a train of satellites crosses the sky every so
-often, and the big satellite flashes when the sun catches its panels. on
-`nebula`, gas boils off the glowing pillar edges, baby stars pulse red inside
-the pillar heads (one shooting out a jet), and every so often a wave of light
-rolls out from the young star cluster.
+often, and the big satellite flashes when the sun catches its panels.
 
 the art goes right to the edge of the window: the timer also tints the
 terminal's padding to match the scene, and puts your normal background back
@@ -70,7 +66,7 @@ if it feels laggy, `g` turns the glow off.
 **backgrounds**
 
 - `←` `→` (or `[` `]`) previous / next
-- `1`–`9`, `0`, `-` jump to one
+- `1`–`9`, `0` jump to one
 - `g` glow on / off
 - `c` switch between 24-bit and 256 colors
 - `h` hide the key hints at the bottom (press again to bring them back)
