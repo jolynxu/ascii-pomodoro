@@ -850,14 +850,22 @@ class Ambient:
 
     def _loop(self, run_id, wake, slug):
         title = TRACKS[slug][0]
-        path = ensure(slug, lambda: self._current(run_id)
-                      and self.on_message(f"tuning in to {title}…"))
+        waited = []
+
+        def waiting():
+            if self._current(run_id):
+                waited.append(True)
+                self.on_message(f"tuning in to {title}…")
+
+        path = ensure(slug, waiting)
         if not self._current(run_id):
             return
         if path is None:
             self.on_message("couldn't make the space sounds")
             self.on = False
             return
+        if waited:
+            self.on_message(f"now playing {title}")
         upcoming = NAMES[(NAMES.index(slug) + 1) % len(NAMES)]
         threading.Thread(target=ensure, args=(upcoming,), daemon=True).start()  # get ahead
         while self._current(run_id):

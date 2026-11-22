@@ -167,7 +167,7 @@ class Watcher(threading.Thread):
             if mtime != self.config_mtime:
                 self.config_mtime = mtime
                 self.app.timer.cfg["blocklist"] = load_config()["blocklist"]
-                self.app.toast("blocklist reloaded")
+                self.app.toast("blocklist reloaded", 3, icon="↻", color=(120, 230, 170))
         except (OSError, ValueError, KeyError):
             pass  # half-saved or broken file: keep the old list
 
@@ -234,6 +234,42 @@ class Padding:
         return ""
 
 
+# ---------------------------------------------------------------- notifications
+
+SOUND_COLOR = (110, 215, 255)
+ERROR_COLOR = (255, 95, 95)
+SPINNER = "◜◝◞◟"
+SCRAMBLE = "·:+*✧<>/\\=~"
+
+
+def ease_out(x):
+    x = max(0.0, min(1.0, x))
+    return 1 - (1 - x) ** 3
+
+
+class Toast:
+    """A little card that pops up under the timer when something changes.
+
+    icon/color give it a look; switch=True/False adds an on/off switch whose
+    knob slides over; dots=(index, count) adds a row of position dots; busy
+    swaps the icon for a spinner. kind groups related cards: a new card of
+    the same kind takes over the open one instead of popping up again."""
+
+    def __init__(self, text, seconds=2.5, icon="✦", color=(255, 140, 220), kind=None,
+                 switch=None, dots=None, busy=False):
+        self.text, self.icon, self.color = text, icon, color
+        self.kind = kind or text
+        self.switch, self.dots, self.busy = switch, dots, busy
+        self.switch_from = None if switch is None else float(not switch)
+        self.born = self.shown = time.time()   # card opened / this message arrived
+        self.expires = self.shown + seconds if seconds else None
+
+    def knob(self, now):
+        """Where the switch knob is: 0 = off (left), 1 = on (right)."""
+        to = float(self.switch)
+        return self.switch_from + (to - self.switch_from) * ease_out((now - self.shown) / 0.3)
+
+
 # ---------------------------------------------------------------- the app
 
 class App:
@@ -249,7 +285,10 @@ class App:
         self.renderer = Renderer(truecolor)
         self.spotify = None          # what Spotify is playing (a dict) or None
         self.eq, self.eq_peak = [], []   # equalizer bar heights
-        self.toasts = []             # (message, expires_at)
+        self.card = None             # the Toast showing under the timer, if any
+        self.error_card = None       # a Toast for mac.last_error (stays up)
+        self.last_phase = self.timer.phase
+        self.pressed = ("", -9.0)    # last key and when (lights up its hint)
         self.closed = 0              # apps closed by the blocklist this run
         self.alert = None            # [app names, started_at] for the warning popup
         self.blocker_changed = -99.0 # when x was last pressed (for the switch effect)
@@ -260,7 +299,7 @@ class App:
         self.now = 0.0
         self.padding = Padding()
         self.ambient = sound.Ambient(cfg.get("ambient_volume", 0.5), cfg.get("ambient_track"),
-                                     on_message=self.toast)
+                                     on_message=self.sound_message)
         if cfg.get("ambient_sound", True):
             self.ambient.start()
 
@@ -271,12 +310,30 @@ class App:
             self.scene_cache[name] = SCENES[name]()
         return self.scene_cache[name]
 
-    def toast(self, msg, seconds=4):
-        self.toasts.append((msg, time.time() + seconds))
+    def toast(self, msg, seconds=4, **style):
+        new = Toast(msg, seconds, **style)
+        old, now = self.card, time.time()
+        if old and old.kind == new.kind and (old.expires or now + 1) > now + 0.35:
+            new.born = old.born                  # same slot: keep the card open, refresh it
+            if old.switch is not None and new.switch is not None:
+                new.switch_from = old.knob(now)
+        self.card = new
+
+    def sound_message(self, msg):
+        """Messages from the ambient sound player, dressed up as cards."""
+        if msg.startswith("tuning in"):
+            self.toast(msg, 8, icon="♪", color=SOUND_COLOR, kind="sound", busy=True)
+        elif msg.startswith("now playing"):
+            self.toast(msg, 2.5, icon="♪", color=SOUND_COLOR, kind="sound",
+                       dots=(self.ambient.track, len(sound.TRACKS)))
+        else:
+            self.toast(msg, 5, icon="!", color=ERROR_COLOR, kind="error")
 
     def set_scene(self, index):
         self.scene_index = index % len(self.scene_names)
         self.switched_at = self.now
+        self.toast(self.scene.name.lower(), 1.8, icon="✧", color=(185, 175, 255), kind="scene",
+                   dots=(self.scene_index, len(self.scene_names)))
 
     def toggle_fullscreen(self, on=None):
         """f: go full screen, or come back out if we already are. on=True/False
@@ -284,14 +341,14 @@ class App:
         def work():
             state = mac.is_fullscreen()            # ask the window, don't guess
             if isinstance(state, str):
-                self.toast(state, 7)
+                self.toast(state, 7, icon="!", color=ERROR_COLOR, kind="error")
                 return
             target = (not state) if on is None else on
             if target != state:
                 for _ in range(2):                 # retry once if macOS ignored us
                     error = mac.set_fullscreen(target)
                     if error:
-                        self.toast(error, 7)
+                        self.toast(error, 7, icon="!", color=ERROR_COLOR, kind="error")
                         return
                     for _ in range(12):            # the animation takes ~1s
                         time.sleep(0.25)
@@ -326,6 +383,7 @@ class App:
 
     def handle_key(self, key):
         t = self.timer
+        self.pressed = (key, time.time())
         if key == " ":
             t.running = not t.running
         elif key == "s":
@@ -351,25 +409,29 @@ class App:
         elif key == "x":
             t.block_apps = not t.block_apps
             self.blocker_changed = time.time()
-            self.toast("app blocker " + ("on" if t.block_apps else "off"), 2)
+            self.toast("app blocker", 2.2, icon="◆" if t.block_apps else "◇",
+                       color=(150, 130, 255), kind="blocker", switch=t.block_apps)
         elif key == "f":
             self.toggle_fullscreen()
         elif key == "a":
             on = self.ambient.toggle()
-            self.toast(f"ambient sound on · {self.ambient.title}" if on else "ambient sound off", 2)
+            self.toast(f"sound · {self.ambient.title}" if on else "sound", 2.2, icon="♪",
+                       color=SOUND_COLOR, kind="sound", switch=on)
         elif key == "t":
             title = self.ambient.next_track()
-            self.toast(f"♪ {title}  ({self.ambient.track + 1}/{len(sound.TRACKS)})", 3)
+            self.toast(title, 2.5, icon="♪", color=SOUND_COLOR, kind="sound",
+                       dots=(self.ambient.track, len(sound.TRACKS)))
         elif key == "h":
             self.show_keys = not self.show_keys
         elif key == "g":
             self.glow = not self.glow
-            self.toast("glow " + ("on" if self.glow else "off"), 2)
+            self.toast("glow", 2, icon="✦", color=(255, 205, 120), kind="glow", switch=self.glow)
         elif key == "c":
             r = self.renderer
             r.truecolor = not r.truecolor
             r.reset()
-            self.toast("true color" if r.truecolor else "256 colors", 2)
+            self.toast("true color" if r.truecolor else "256 colors", 2, icon="◐",
+                       color=(190, 190, 255), kind="colors")
         elif key == "q":
             return False
         return True
@@ -485,6 +547,109 @@ class App:
         cv.text(tx + 3, py + 2, title, scale((255, 240, 240), k))
         cv.text(px + (pw - len(sub)) // 2, py + 3, sub, scale((215, 150, 160), k))
 
+    def draw_toast(self, cv, y, card, t):
+        """The notification card: it pops open from the middle, its text
+        decodes in behind a glint, a switch slides or a dot lights up, the
+        bottom edge drains as a countdown, then it folds away and fades."""
+        now = time.time()
+        age, fresh = now - card.born, now - card.shown
+        k = min(1.0, (card.expires - now) / 0.35) if card.expires else 1.0   # fade out
+        if k <= 0:
+            return
+        color = card.color
+        icon = SPINNER[int(t * 10) % 4] if card.busy else card.icon
+
+        # what goes inside: icon, text, then a switch or dots
+        extra = ""
+        if card.switch is not None:
+            extra = "   ━━━━ " + ("on" if card.switch else "off")
+        elif card.dots:
+            extra = "   " + "·" * card.dots[1]
+        text = card.text[: max(4, cv.w - 16 - len(extra))]
+        content = icon + "  " + text + extra
+        full = len(content) + 6
+        cw = max(2, int(full * ease_out(age / 0.22) * (0.55 + 0.45 * k)))
+        bx = (cv.w - cw) // 2
+        cx = (cv.w - len(content)) // 2
+        boxed = y + 3 <= cv.h - 4                     # room for a box, or just one line?
+        row = y + 1 if boxed else y
+
+        # backdrop: darken behind the card and tint it with its color, which
+        # flashes brighter for a moment as the card opens
+        cv.soft_shade(cv.w / 2, row, cw / 2 + 6, 2.4, 0.35 * k)
+        burst = math.exp(-age * 5)
+        tint = scale(color, k * (0.08 + 0.22 * burst))
+        rows = (y, y + 1, y + 2) if boxed else (row,)
+        cv.dim_rect(bx, rows[0], cw, len(rows), 1 - 0.8 * k)
+        for yy in rows:
+            for xx in range(bx + 1, bx + cw - 1):
+                cv.add_bg(xx, yy, tint)
+
+        if boxed:   # rounded border: a glint runs along the top, the bottom drains
+            edge = scale(lerp(color, (255, 255, 255), 0.15), 0.6 * k)
+            sweep = fresh / 0.55 * (cw + 12) - 6
+            life = (card.expires - now) / (card.expires - card.shown) if card.expires else 1
+            for i in range(cw):
+                x = bx + i
+                corner = i == 0 or i == cw - 1
+                glint = math.exp(-((i - sweep) / 2.5) ** 2)
+                top = "╭" if i == 0 else "╮" if i == cw - 1 else "─"
+                cv.put(x, y, top, lerp(edge, scale((255, 255, 255), k), 0.8 * glint))
+                bottom = "╰" if i == 0 else "╯" if i == cw - 1 else "─"
+                drained = not corner and (i - 1) / max(1, cw - 2) > life
+                cv.put(x, y + 2, bottom, scale(edge, 0.35) if drained else edge)
+            cv.put(bx, y + 1, "│", edge)
+            cv.put(bx + cw - 1, y + 1, "│", edge)
+
+        def put(x, ch, col):                    # draw inside the card only (it's opening)
+            if bx + 1 < x < bx + cw - 2 or (not boxed and bx <= x < bx + cw):
+                cv.put(x, row, ch, scale(col, k))
+
+        # icon, with a pulse of light when the message arrives
+        breathe = 0.5 + 0.5 * math.sin(t * 3)
+        put(cx, icon, lerp(color, (255, 255, 255), 0.25 + 0.5 * math.exp(-fresh * 5)))
+        if bx + 1 < cx < bx + cw - 2:
+            cv.glow(cx, row, color, 2.2, k * (0.1 + 0.06 * breathe + 0.3 * math.exp(-fresh * 4)))
+
+        # text decodes in from the left behind a bright glint
+        tx = cx + 3
+        reveal = max(0.0, fresh - 0.06) / 0.3 * (len(text) + 3)
+        scramble = random.Random(int(t * 24))
+        base = lerp(color, (255, 255, 255), 0.72)
+        for i, ch in enumerate(text):
+            if i < reveal - 3:
+                glint = math.exp(-((reveal - 3 - i) / 2.2) ** 2)
+                put(tx + i, ch, lerp(base, (255, 255, 255), 0.9 * glint))
+            elif i < reveal and ch != " ":
+                put(tx + i, scramble.choice(SCRAMBLE), scale(color, 0.7))
+
+        ex = tx + len(text) + 3
+        if card.switch is not None:            # on/off switch with a sliding knob
+            pos = card.knob(now)
+            knob = round(pos * 3)
+            for i in range(4):
+                if i == knob:
+                    put(ex + i, "●", lerp((150, 150, 170), lerp(color, (255, 255, 255), 0.4), pos))
+                elif i < knob:
+                    put(ex + i, "━", scale(color, 0.75))
+                else:
+                    put(ex + i, "─", (80, 80, 100))
+            if pos > 0.5 and bx + 1 < ex + knob < bx + cw - 2:
+                cv.glow(ex + knob, row, color, 2.0, 0.2 * k * pos)
+            word = "on" if card.switch else "off"
+            for i, ch in enumerate(word):
+                put(ex + 5 + i, ch, lerp(color, (255, 255, 255), 0.3) if card.switch else (125, 125, 145))
+        elif card.dots:                        # which one of how many
+            here, n = card.dots
+            light = ease_out(fresh / 0.25)
+            for i in range(n):
+                if i == here:
+                    put(ex + i, "●", lerp((90, 90, 115), lerp(color, (255, 255, 255), 0.3), light))
+                    if bx + 1 < ex + i < bx + cw - 2:
+                        cv.glow(ex + i, row, color, 2.0, 0.2 * k * light)
+                else:
+                    put(ex + i, "·", (90, 90, 115))
+
     def draw_hud(self, cv, t, accent):
         """Bottom bar: now playing on the left, scene on the right, keys below.
         The background art fades out underneath instead of being boxed off."""
@@ -523,9 +688,16 @@ class App:
         x = (w - total) // 2
         key_col = lerp(accent, (255, 255, 255), 0.2)
         cv.text(x - 1, h - 1, " " * (total + 2), (0, 0, 0))
+        pressed, when = self.pressed
+        flash = max(0.0, 1 - (time.time() - when) / 0.45)
+        pressed = {" ": "space", "left": "← →", "right": "← →", "[": "← →", "]": "← →",
+                   ",": "← →", ".": "← →"}.get(pressed, pressed)
         for key, label in hints:
-            cv.text(x, h - 1, key, key_col)
-            cv.text(x + len(key) + 1, h - 1, label, (105, 105, 128))
+            lit = flash if flash and pressed in key.split() + [key] else 0.0
+            cv.text(x, h - 1, key, lerp(key_col, (255, 255, 255), lit))
+            cv.text(x + len(key) + 1, h - 1, label, lerp((105, 105, 128), (220, 220, 240), lit))
+            if lit:
+                cv.glow(x + len(key) // 2, h - 1, accent, 1.5, 0.45 * lit)
             x += len(key) + len(label) + 4
 
     def draw_spotify(self, cv, t, row, room):
@@ -738,12 +910,21 @@ class App:
         if self.timer.phase == "focus" and running:
             self.draw_blocker(cv, y0 + 9, t)
 
+        if self.timer.phase != self.last_phase:      # focus <-> break: announce it
+            self.last_phase = self.timer.phase
+            mins = self.timer.length() / 60
+            self.toast(f"{label.lower()} · {mins:g} min", 3,
+                       icon={"focus": "◎", "short_break": "☾", "long_break": "✦"}[self.timer.phase],
+                       color=PHASES[self.timer.phase][1], kind="phase")
         now = time.time()
-        self.toasts = [m for m in self.toasts if m[1] > now]
-        if self.toasts:
-            cv.center(y0 + 10, self.toasts[-1][0], (255, 140, 220))
+        if self.card and self.card.expires and self.card.expires <= now:
+            self.card = None
+        if self.card:
+            self.draw_toast(cv, y0 + 10, self.card, t)
         elif mac.last_error:
-            cv.center(y0 + 10, mac.last_error, (255, 95, 95))
+            if not self.error_card or self.error_card.text != mac.last_error:
+                self.error_card = Toast(mac.last_error, 0, icon="!", color=ERROR_COLOR)
+            self.draw_toast(cv, y0 + 10, self.error_card, t)
 
         self.draw_hud(cv, t, light)
         pad = self.padding.update(cv.edge_color(), t) if fade >= 1 else ""
