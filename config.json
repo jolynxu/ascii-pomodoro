@@ -10,7 +10,7 @@
   "block_apps": true,
   "ambient_sound": true,
   "ambient_volume": 0.5,
-  "ambient_track": "static",
+  "ambient_track": "deepspace",
   "blocklist": [
     "Discord",
     "Messages",

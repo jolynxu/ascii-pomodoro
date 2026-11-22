@@ -110,18 +110,14 @@ everything lives in `config.json`:
 
 ### ambient sound
 
-seven space-y noise tracks to focus to. `a` turns the sound on and off, `t`
+three space-y noise tracks to focus to. `a` turns the sound on and off, `t`
 flips to the next track.
 
 | name        | what it sounds like                                                 |
 |-------------|---------------------------------------------------------------------|
-| `static`    | **cosmic static**: soft, even white noise, the hiss of the big bang |
 | `deepspace` | **deep space**: low brown noise that slowly breathes in and out     |
 | `console`   | **comms console**: someone typing at a console while radio calls come in, data squeals down the line and a satellite beacon beeps |
-| `observatory` | **observatory**: a calm, low drone with someone typing softly, glassy dings echoing, and whistlers and chorus (real radio sounds from earth's magnetosphere) |
-| `station`   | **space station**: cabin fans, a pump now and then, soft chimes and a far-off radio call |
 | `mission`   | **mission control**: ground and crew talking over the radio, with Apollo-style beeps, crackle and squelch |
-| `shortwave` | **shortwave**: static fading in and out, morse code, tuning whistles and a ticking pulsar |
 
 the radio voices are made up: they sound like people talking but there are no
 real words, so they won't pull your attention.
@@ -133,7 +129,7 @@ macOS's built-in `afplay`. you can also listen from the command line:
 
 ```bash
 python3 sound.py              # list the tracks
-python3 sound.py shortwave    # play one loop of a track
+python3 sound.py mission      # play one loop of a track
 python3 sound.py --make all   # make every track ahead of time
 ```
 
