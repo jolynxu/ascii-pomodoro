@@ -10,6 +10,7 @@ Usage:
     python3 ascii_pomodoro.py --focus 0.2 --break 0.1   # quick test (12s / 6s)
 
     python3 ascii_pomodoro.py --scene aurora   # start on a different background
+    python3 ascii_pomodoro.py --sound mission  # start with a different ambient track
 
 Keys:
     space  start / pause         s  skip to next session
@@ -19,7 +20,7 @@ Keys:
     g      glow on/off           c  true color / 256 color
     h      hide / show the key hints
     x      app blocker on/off      f  full screen on/off
-    a      ambient space sounds on/off
+    a      ambient space sounds on/off   t  next ambient track
 """
 
 import argparse
@@ -258,7 +259,8 @@ class App:
         self.show_keys = True
         self.now = 0.0
         self.padding = Padding()
-        self.ambient = sound.Ambient(cfg.get("ambient_volume", 0.5), on_message=self.toast)
+        self.ambient = sound.Ambient(cfg.get("ambient_volume", 0.5), cfg.get("ambient_track"),
+                                     on_message=self.toast)
         if cfg.get("ambient_sound", True):
             self.ambient.start()
 
@@ -354,7 +356,10 @@ class App:
             self.toggle_fullscreen()
         elif key == "a":
             on = self.ambient.toggle()
-            self.toast("ambient sound " + ("on" if on else "off"), 2)
+            self.toast(f"ambient sound on · {self.ambient.title}" if on else "ambient sound off", 2)
+        elif key == "t":
+            title = self.ambient.next_track()
+            self.toast(f"♪ {title}  ({self.ambient.track + 1}/{len(sound.TRACKS)})", 3)
         elif key == "h":
             self.show_keys = not self.show_keys
         elif key == "g":
@@ -509,7 +514,7 @@ class App:
         # key hints: keys in color, labels gray; drop some if the window is narrow
         screen = "exit full screen" if self.fullscreen else "full screen"
         hints = [("space", "start/pause"), ("s", "skip"), ("r", "restart"), ("← →", "scene"),
-                 ("g", "glow"), ("x", "blocker"), ("f", screen), ("a", "sound"), ("p n b", "music"),
+                 ("g", "glow"), ("x", "blocker"), ("f", screen), ("a t", "sound"), ("p n b", "music"),
                  ("h", "hide keys"),
                  ("q", "quit")]
         while hints and sum(len(k) + len(v) + 4 for k, v in hints) - 3 > w - 4:
@@ -772,6 +777,8 @@ def main():
     parser.add_argument("--focus", type=float, help="focus minutes")
     parser.add_argument("--break", dest="brk", type=float, help="short break minutes")
     parser.add_argument("--scene", choices=list(SCENES), help="background to start on")
+    parser.add_argument("--sound", choices=list(sound.TRACKS),
+                        help="ambient track to play (python3 sound.py lists them)")
     parser.add_argument("--fullscreen", action="store_true",
                         help="put the terminal window in full screen")
     parser.add_argument("--colors", choices=["auto", "truecolor", "256"], default="auto",
@@ -783,6 +790,8 @@ def main():
         cfg["focus_minutes"] = args.focus
     if args.brk:
         cfg["short_break_minutes"] = args.brk
+    if args.sound:
+        cfg["ambient_track"], cfg["ambient_sound"] = args.sound, True
 
     truecolor = supports_truecolor() if args.colors == "auto" else args.colors == "truecolor"
     app = App(cfg, scene=args.scene or cfg.get("scene"), truecolor=truecolor)

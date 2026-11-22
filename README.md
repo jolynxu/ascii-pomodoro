@@ -18,6 +18,7 @@ no installs, just python 3. some other ways to start it:
 ```bash
 python3 ascii_pomodoro.py --focus 50 --break 10    # longer sessions, just for this run
 python3 ascii_pomodoro.py --scene aurora           # start on a specific background
+python3 ascii_pomodoro.py --sound mission          # start with a specific ambient track
 python3 ascii_pomodoro.py --fullscreen             # go full screen right away
 python3 ascii_pomodoro.py --focus 0.2 --break 0.1  # 12s focus / 6s break, good for testing
 ```
@@ -61,6 +62,7 @@ if it feels laggy, `g` turns the glow off.
 - `x` turn the app blocker on / off
 - `f` full screen on / off
 - `a` ambient space sounds on / off
+- `t` next ambient track
 - `q` quit
 
 **backgrounds**
@@ -104,13 +106,36 @@ everything lives in `config.json`:
 | `blocklist`                  | apps that get closed while you're focusing       |
 | `ambient_sound`              | play ambient space sounds (`a` also toggles it)  |
 | `ambient_volume`             | how loud the ambient sounds are, from 0 to 1     |
+| `ambient_track`              | which ambient track to start with (see below)    |
 
 ### ambient sound
 
-a soft space soundtrack: a low drone, drifting solar wind, twinkling chimes
-with long echoes, and the odd far-off radio blip. it's made from scratch the
-first time you turn it on (takes a second or two) and saved in
-`~/Library/Caches/ascii_pomodoro/`, then looped with macOS's built-in `afplay`.
+seven space-y noise tracks to focus to. `a` turns the sound on and off, `t`
+flips to the next track.
+
+| name        | what it sounds like                                                 |
+|-------------|---------------------------------------------------------------------|
+| `static`    | **cosmic static**: soft, even white noise, the hiss of the big bang |
+| `deepspace` | **deep space**: low brown noise that slowly breathes in and out     |
+| `solarwind` | **solar wind**: pink noise gusting through a whistling filter       |
+| `engine`    | **engine room**: a starship's deep, pulsing engine and air vents    |
+| `station`   | **space station**: cabin fans, a pump now and then, soft chimes and a far-off radio call |
+| `mission`   | **mission control**: ground and crew talking over the radio, with Apollo-style beeps, crackle and squelch |
+| `shortwave` | **shortwave**: static fading in and out, morse code, tuning whistles and a ticking pulsar |
+
+the radio voices are made up: they sound like people talking but there are no
+real words, so they won't pull your attention.
+
+everything is made from scratch with plain math the first time you play a
+track (a second or two, in the background) and saved in
+`~/Library/Caches/ascii_pomodoro/` (about 5.6 MB per track), then looped with
+macOS's built-in `afplay`. you can also listen from the command line:
+
+```bash
+python3 sound.py              # list the tracks
+python3 sound.py shortwave    # play one loop of a track
+python3 sound.py --make all   # make every track ahead of time
+```
 
 ### the blocklist
 
