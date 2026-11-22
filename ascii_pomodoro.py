@@ -408,9 +408,7 @@ class App:
             self.set_scene((int(key) or 10) - 1)   # 0 picks the 10th
         elif key == "x":
             t.block_apps = not t.block_apps
-            self.blocker_changed = time.time()
-            self.toast("app blocker", 2.2, icon="◆" if t.block_apps else "◇",
-                       color=(150, 130, 255), kind="blocker", switch=t.block_apps)
+            self.blocker_changed = time.time()   # the status line under the timer shows it
         elif key == "f":
             self.toggle_fullscreen()
         elif key == "a":
