@@ -118,7 +118,7 @@ flips to the next track.
 | `static`    | **cosmic static**: soft, even white noise, the hiss of the big bang |
 | `deepspace` | **deep space**: low brown noise that slowly breathes in and out     |
 | `console`   | **comms console**: someone typing at a console while radio calls come in, data squeals down the line and a satellite beacon beeps |
-| `engine`    | **engine room**: a starship's deep, pulsing engine and air vents    |
+| `observatory` | **observatory**: a calm, low drone with someone typing softly, glassy dings echoing, and whistlers and chorus (real radio sounds from earth's magnetosphere) |
 | `station`   | **space station**: cabin fans, a pump now and then, soft chimes and a far-off radio call |
 | `mission`   | **mission control**: ground and crew talking over the radio, with Apollo-style beeps, crackle and squelch |
 | `shortwave` | **shortwave**: static fading in and out, morse code, tuning whistles and a ticking pulsar |

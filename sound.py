@@ -1,11 +1,11 @@
-"""Ambient space sounds: white noise, engine hum and radio chatter from orbit.
+"""Ambient space sounds: white noise, typing, dings and radio chatter from orbit.
 
 There are several tracks to pick from (`t` flips through them in the timer):
 
     static      cosmic static: soft, even white noise, the hiss left over from the big bang
     deepspace   deep space: low brown noise that slowly breathes in and out
     console     comms console: typing at a console, radio calls, data bursts and a beacon
-    engine      engine room: a starship's deep, throbbing engine under rumbling noise
+    observatory observatory: a soft drone, gentle typing, glassy dings and space whistles
     station     space station: cabin fans, humming equipment, the odd beep and call
     mission     mission control: radio chatter with Quindar beeps, crackle and squelch
     shortwave   shortwave: drifting static, morse code, tuning whistles and a pulsar
@@ -436,25 +436,129 @@ def make_console(rnd):
     return L, R
 
 
-def make_engine(rnd):
-    """A starship's engine room: a deep hum pulsing slowly under brown-noise
-    rumble and the hiss of air vents."""
-    w = white(rnd)
-    rumble = brown(w)
-    vent = highpass(lowpass(shifted(w), 5000), 2000)
-    hum = [0.0] * N
-    base = 41.2
-    for h, a in ((1, 1.0), (2, 0.65), (3, 0.4), (4, 0.22), (6, 0.12), (8, 0.06)):
-        step = TAU * base * h / RATE
+def soft_key(rnd, weight=1.0):
+    """A quiet laptop key: a short, muffled tap with no clack (deeper and a
+    touch longer for the bigger keys)."""
+    n = sec(0.04)
+    tap = biquad(white(rnd, n), "bp", rnd.uniform(650, 950) / weight, 1.5)
+    tick = biquad(white(rnd, n), "bp", rnd.uniform(2000, 2600), 3)
+    return [2.2 * tap[k] * exp(-k / (0.005 * RATE * weight)) + 0.5 * tick[k] * exp(-k / (0.0012 * RATE))
+            for k in range(n)]
+
+
+def bell(hz, ring=1.6):
+    """A glassy 'ding': a few bell-like overtones fading at different speeds."""
+    n = sec(ring * 2.5)
+    out = [0.0] * n
+    for mult, amp, decay in ((1.0, 1.0, 1.0), (2.76, 0.35, 0.45), (5.4, 0.12, 0.2), (2.0, 0.2, 0.7)):
+        w = TAU * hz * mult / RATE
+        d = ring * decay * RATE
+        for k in range(n):
+            out[k] += amp * sin(w * k) * exp(-k / d)
+    for k in range(min(n, 60)):                # no click at the start
+        out[k] *= k / 60
+    return out
+
+
+def whistler(rnd):
+    """A 'whistler': lightning's radio crackle stretched by the magnetosphere
+    into a falling whistle (it's real, and sounds like a sci-fi slide)."""
+    d = rnd.uniform(1.2, 2.2)
+    top, bottom = rnd.uniform(3500, 5500), rnd.uniform(500, 900)
+    n, ph, out = sec(d), 0.0, []
+    for k in range(n):
+        q = k / n
+        f = bottom + (top - bottom) / (1 + 7 * q) ** 2
+        ph += TAU * f / RATE
+        out.append(sin(ph) * min(1.0, q * 25) * (1 - q) ** 1.5)
+    return out
+
+
+def chorus(rnd):
+    """'Chorus': quick rising chirps from Earth's radiation belts, like a
+    flock of far-off birds."""
+    out = []
+    for _ in range(rnd.randint(4, 9)):
+        d = rnd.uniform(0.12, 0.3)
+        lo = rnd.uniform(700, 1100)
+        hi = lo * rnd.uniform(1.6, 2.3)
+        n, ph = sec(d), 0.0
+        for k in range(n):
+            q = k / n
+            ph += TAU * (lo + (hi - lo) * q * q) / RATE
+            out.append(sin(ph) * sin(pi * q) ** 2)
+        out += silence(rnd.uniform(0.05, 0.35))
+    return out
+
+
+def echo(L, R, left=0.31, right=0.47, feedback=0.42):
+    """A ping-pong echo, so sounds ring out across a big, empty space (in place)."""
+    a, b = sec(left), sec(right)
+    for i in range(N):
+        if i >= a:
+            L[i] += feedback * R[i - a]
+        if i >= b:
+            R[i] += feedback * L[i - b]
+
+
+def make_observatory(rnd):
+    """A quiet observatory at night: a soft drone, someone typing gently,
+    glassy dings, and the whistles and chirps of space weather on the radio."""
+    # the drone: a calm, open chord whose notes slowly swell in and out, with
+    # only a breath of noise underneath
+    L = [0.0] * N
+    R = [0.0] * N
+    for hz, amp, period, side in ((110.0, 0.5, 23, 0), (110.3, 0.35, 31, 1), (164.81, 0.3, 19, 0),
+                                  (220.0, 0.2, 29, 1), (277.18, 0.08, 37, 0), (329.63, 0.1, 17, 1)):
+        w = TAU * hz / RATE
         ph = rnd.uniform(0, TAU)
-        for i in range(N):
-            hum[i] += a * sin(ph + step * i)
-    # the core pulses every 2.4 seconds, and slowly surges every so often
-    envelope(hum, lambda t: 0.45 * (0.55 + 0.45 * (0.5 + 0.5 * cos(TAU * t / 2.4)) ** 3)
-             * (0.8 + 0.2 * slow(t, (17, 0.4))))
-    L = [r + 0.6 * h + 0.08 * v for r, h, v in zip(rumble, hum, vent)]
-    rumble2, vent2 = shifted(rumble), shifted(vent)
-    R = [r + 0.6 * h + 0.08 * v for r, h, v in zip(rumble2, hum, vent2)]
+        chan, other = (L, R) if side == 0 else (R, L)
+        for b in range(0, N, 256):
+            g = amp * (0.5 + 0.5 * sin(TAU * b / RATE / period + ph))
+            for i in range(b, min(N, b + 256)):
+                v = g * sin(ph + w * i)
+                chan[i] += v
+                other[i] += 0.6 * v
+    air = lowpass(brown(white(rnd)), 400)
+    air2 = shifted(air)
+    for i in range(N):
+        L[i] = 0.1 * L[i] + 0.15 * air[i]
+        R[i] = 0.1 * R[i] + 0.15 * air2[i]
+
+    # sounds that ring out through the echo: dings, whistlers, chorus
+    fxL, fxR = [0.0] * N, [0.0] * N
+    notes = (659.26, 783.99, 880.0, 987.77, 1174.66, 1318.51)      # a soft pentatonic
+    t = FADE + rnd.uniform(1, 4)
+    while t < LOOP - 4:
+        hz = rnd.choice(notes)
+        place(fxL, fxR, bell(hz), t, 0.09, rnd.uniform(-0.6, 0.6))
+        if rnd.random() < 0.35:                               # a two-note ding
+            place(fxL, fxR, bell(hz * 1.5), t + 0.18, 0.06, rnd.uniform(-0.6, 0.6))
+        t += rnd.uniform(7, 14)
+    for t in (rnd.uniform(9, 16), rnd.uniform(28, 34), rnd.uniform(45, 52)):
+        place(fxL, fxR, whistler(rnd), t, 0.05, rnd.uniform(-0.8, 0.8))
+    for t in (rnd.uniform(18, 24), rnd.uniform(38, 43)):
+        place(fxL, fxR, chorus(rnd), t, 0.04, rnd.uniform(-0.7, 0.7))
+    echo(fxL, fxR)
+    for i in range(N):
+        L[i] += fxL[i]
+        R[i] += fxR[i]
+
+    # gentle typing, dry and close, in unhurried stretches
+    keys = [soft_key(rnd) for _ in range(10)]
+    space = [soft_key(rnd, 1.4) for _ in range(2)]
+    t = FADE + rnd.uniform(0.5, 2)
+    while t < LOOP - 3:
+        until = min(LOOP - 2, t + rnd.uniform(3, 8))
+        while t < until:
+            for _ in range(rnd.randint(2, 7)):
+                place(L, R, rnd.choice(keys), t, 0.22 * rnd.uniform(0.7, 1.0), rnd.uniform(-0.15, 0.25))
+                t += max(0.07, rnd.gauss(0.16, 0.05))
+            place(L, R, rnd.choice(space), t, 0.26 * rnd.uniform(0.8, 1.0), 0.0)
+            t += max(0.1, rnd.gauss(0.22, 0.07))
+            if rnd.random() < 0.15:
+                t += rnd.uniform(0.6, 2.0)
+        t += rnd.uniform(3, 8)                                # sit back and think
     return L, R
 
 
@@ -568,7 +672,7 @@ TRACKS = {
     "static": ("cosmic static", make_static, 0.085, "soft, even white noise"),
     "deepspace": ("deep space", make_deepspace, 0.2, "low brown noise, slowly breathing"),
     "console": ("comms console", make_console, 0.12, "typing, radio calls and data signals"),
-    "engine": ("engine room", make_engine, 0.17, "a starship's throbbing engine and air vents"),
+    "observatory": ("observatory", make_observatory, 0.1, "soft typing, glassy dings and space whistles"),
     "station": ("space station", make_station, 0.12, "cabin fans, chimes and a far-off radio call"),
     "mission": ("mission control", make_mission, 0.12, "radio chatter, Quindar beeps and squelch"),
     "shortwave": ("shortwave", make_shortwave, 0.11, "static, morse code, whistles and a pulsar"),
@@ -777,7 +881,7 @@ def _main(args):
             pass
         return
     for slug, (title, _, _, blurb) in TRACKS.items():
-        print(f"  {slug:<10} {title:<16} {blurb}")
+        print(f"  {slug:<12} {title:<16} {blurb}")
     print("\nplay one with: python3 sound.py <name>")
 
 
