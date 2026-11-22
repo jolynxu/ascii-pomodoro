@@ -4,7 +4,7 @@ There are several tracks to pick from (`t` flips through them in the timer):
 
     static      cosmic static: soft, even white noise, the hiss left over from the big bang
     deepspace   deep space: low brown noise that slowly breathes in and out
-    solarwind   solar wind: pink noise gusting through a sweeping, whistling filter
+    console     comms console: typing at a console, radio calls, data bursts and a beacon
     engine      engine room: a starship's deep, throbbing engine under rumbling noise
     station     space station: cabin fans, humming equipment, the odd beep and call
     mission     mission control: radio chatter with Quindar beeps, crackle and squelch
@@ -327,25 +327,113 @@ def make_deepspace(rnd):
     return out[0], out[1]
 
 
-def make_solarwind(rnd):
-    """Pink noise blowing through a whistling filter that sweeps up and down
-    in gusts, drifting from one side to the other."""
-    x = pink(white(rnd))
+def keystroke(rnd, weight=1.0):
+    """One key going down: a sharp plastic click, a little rattle and a soft
+    thock from the keyboard's body. Bigger keys (weight > 1) sound deeper."""
+    n = sec(0.07)
+    click = biquad(white(rnd, n), "hp", rnd.uniform(2800, 4000))
+    rattle = biquad(white(rnd, n), "bp", rnd.uniform(1100, 1900), 2)
+    body = biquad(white(rnd, n), "bp", rnd.uniform(220, 420) / weight, 4)
     out = []
-    for ch, ph in ((x, 0.0), (shifted(x), 2.1)):
-        lo = band = 0.0
-        res = [0.0] * N
-        for b in range(0, N, 64):
-            t = b / RATE
-            gust = slow(t, (9.0, ph), (23.0, ph * 1.7), (5.3, ph * 0.4)) ** 2
-            f = 2 * sin(pi * (220 + 1500 * gust) / RATE)
-            amp = 0.35 + 0.9 * gust
-            for i in range(b, min(N, b + 64)):
-                lo += f * band
-                band += f * (ch[i] - lo - 0.55 * band)
-                res[i] = 0.35 * ch[i] + amp * band
-        out.append(res)
-    return out[0], out[1]
+    for k in range(n):
+        out.append(0.6 * click[k] * exp(-k / (0.0018 * RATE))
+                   + 1.2 * rattle[k] * exp(-k / (0.006 * RATE))
+                   + 2.5 * weight * body[k] * exp(-k / (0.014 * RATE * weight)))
+    return out
+
+
+def data_burst(rnd, seconds):
+    """A modem-like squeal of data: two tones flipping back and forth for 1s and 0s."""
+    lo, hi = rnd.choice(((1070, 1270), (1200, 2200), (2025, 2225)))
+    baud = rnd.choice((150, 300, 600))
+    n, per_bit = sec(seconds), RATE // baud
+    out, ph, f = [], 0.0, lo
+    for k in range(n):
+        if k % per_bit == 0:
+            f = hi if rnd.random() < 0.5 else lo
+        ph += TAU * f / RATE
+        out.append(sin(ph) * min(1.0, k / 200, (n - k) / 200))
+    return radio(out, rnd, drive=1.5, hiss=0.15)
+
+
+def make_console(rnd):
+    """Someone at a comms console: bursts of typing, radio calls coming in,
+    data squealing down the line and a satellite beacon beeping away."""
+    w = white(rnd)
+    room = [a + 0.3 * b for a, b in zip(lowpass(pink(w), 1500), brown(shifted(w)))]
+    L, R = room, shifted(room)
+    hum = [0.02 * sin(TAU * 120 * i / RATE) + 0.01 * sin(TAU * 240 * i / RATE) for i in range(N)]
+    for i in range(N):
+        L[i] = 0.25 * L[i] + hum[i]
+        R[i] = 0.25 * R[i] + hum[i]
+
+    keys = [keystroke(rnd) for _ in range(14)]           # one keyboard's worth of sounds
+    ups = [[v * 0.35 for v in keystroke(rnd)] for _ in range(4)]
+    space = [keystroke(rnd, 1.6) for _ in range(2)]
+    enter = keystroke(rnd, 1.35)
+
+    def press(sound, t, gain):
+        pan = rnd.uniform(-0.3, 0.3)
+        place(L, R, sound, t, gain * rnd.uniform(0.75, 1.0), pan)
+        place(L, R, rnd.choice(ups), t + rnd.uniform(0.05, 0.1), gain, pan)   # key coming back up
+
+    def typing(t, until):
+        """Type words until `until`; returns when it stopped."""
+        while t < until:
+            for _ in range(rnd.randint(2, 8)):
+                press(rnd.choice(keys), t, 0.75)
+                t += max(0.045, rnd.gauss(0.12, 0.04))
+            if rnd.random() < 0.1:                      # oops: backspace a few
+                t += rnd.uniform(0.2, 0.5)
+                for _ in range(rnd.randint(2, 5)):
+                    press(keys[0], t, 0.75)
+                    t += rnd.uniform(0.07, 0.1)
+            if rnd.random() < 0.15:                     # end of a line
+                t += rnd.uniform(0.2, 0.6)
+                press(enter, t, 1.0)
+                t += rnd.uniform(0.6, 1.8)
+            else:
+                press(rnd.choice(space), t, 0.85)
+                t += max(0.08, rnd.gauss(0.16, 0.05))
+                if rnd.random() < 0.12:                 # stop and think
+                    t += rnd.uniform(0.5, 1.8)
+        return t
+
+    # a shuffled deck of what happens between bursts of typing, so every
+    # loop gets a mix of calls, data and a beacon
+    deck = ["radio", "data", "beacon", "radio", "data"]
+    rnd.shuffle(deck)
+    t, last = FADE + 0.4, "radio"
+    while t < LOOP - 3 and deck:
+        if last != "typing":
+            t = typing(t, min(LOOP - 2, t + rnd.uniform(2.5, 7))) + rnd.uniform(0.3, 1.2)
+            last = "typing"
+            continue
+        pick = deck.pop()
+        if pick == "radio" and t > LOOP - 9:
+            pick = "data"                               # no room left for a whole call
+        if pick == "radio":                             # a call comes in
+            msg = transmission(rnd, rnd.choice(("capcom", "crew")))
+            place(L, R, msg, t, 0.35, rnd.uniform(-0.4, 0.4))
+            end = t + len(msg) / RATE
+            if rnd.random() < 0.4:                      # keep typing while listening
+                typing(t + rnd.uniform(0.8, 1.5), end - 0.3)
+            t = end + rnd.uniform(0.5, 1.5)
+            last = "radio"
+        elif pick == "data":                           # data squealing in
+            d = rnd.uniform(0.6, 1.8)
+            place(L, R, data_burst(rnd, d), t, 0.1, rnd.uniform(-0.5, 0.5))
+            t += d + rnd.uniform(0.4, 1.2)
+            last = "data"
+        else:                                           # a satellite beacon passing over
+            pan, d = rnd.uniform(-0.6, 0.6), rnd.uniform(5, 8)
+            hz, s = rnd.uniform(880, 1050), 0.0
+            while s < d and t + s < LOOP - 1:
+                place(L, R, tone(hz, 0.3, 0.01), t + s, 0.06 * sin(pi * s / d), pan)
+                s += 0.6
+            t += rnd.uniform(1.5, 3)                    # typing carries on under it
+            last = "beacon"
+    return L, R
 
 
 def make_engine(rnd):
@@ -479,7 +567,7 @@ def make_shortwave(rnd):
 TRACKS = {
     "static": ("cosmic static", make_static, 0.085, "soft, even white noise"),
     "deepspace": ("deep space", make_deepspace, 0.2, "low brown noise, slowly breathing"),
-    "solarwind": ("solar wind", make_solarwind, 0.13, "pink noise gusting through a whistling filter"),
+    "console": ("comms console", make_console, 0.12, "typing, radio calls and data signals"),
     "engine": ("engine room", make_engine, 0.17, "a starship's throbbing engine and air vents"),
     "station": ("space station", make_station, 0.12, "cabin fans, chimes and a far-off radio call"),
     "mission": ("mission control", make_mission, 0.12, "radio chatter, Quindar beeps and squelch"),
