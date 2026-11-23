@@ -38,7 +38,7 @@ flip through them with the arrow keys, or press the key to jump straight there.
 | 7   | `orbit`     | earth from orbit: city lights, aurora, a satellite floats by   |
 | 8   | `pulsar`    | spinning neutron star sweeping its beams around like a lighthouse |
 | 9   | `comet`     | comet with a blue ion tail and a dusty gold one                |
-| 0   | `aurora`    | the northern lights over snowy mountains and a still lake      |
+| 0   | `aurora`    | the northern lights, shifting through green, gold, magenta and icy blue, over snowy mountains and a still lake |
 
 keep an eye out on `orbit`: a train of satellites crosses the sky every so
 often, and the big satellite flashes when the sun catches its panels.

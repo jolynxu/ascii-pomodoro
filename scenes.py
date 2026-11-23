@@ -9,7 +9,7 @@
     orbit      low Earth orbit: city lights, aurora, a satellite, a Starlink train
     pulsar     a spinning neutron star sweeping lighthouse beams
     comet      a comet with a blue ion tail and a curved dust tail
-    aurora     the northern lights over mountains and a still lake
+    aurora     the northern lights in green, gold and magenta over mountains and a lake
 """
 
 import math
@@ -835,12 +835,57 @@ class Comet:
 
 # ---------------------------------------------------------------- 10. northern lights
 
+# Aurora colors from the bright bottom edge of a curtain (0) up through it
+# (1 = one curtain height; the rays reach about 2.7), plus the thin fringe
+# that glows just under the edge. The palettes melt into one another across
+# the sky, in this order and back round to the start, so the lights pass
+# from green to gold to magenta to icy blue and back again. The last number
+# brightens the palettes that would otherwise look dimmer than green.
+AURORA = [
+    # classic: a pale gold edge, vivid green, cyan, then violet and magenta tops
+    ([(0.0, (255, 245, 170)), (0.18, (150, 255, 90)), (0.55, (40, 255, 140)),
+      (1.1, (30, 205, 225)), (1.8, (130, 80, 255)), (2.7, (255, 50, 200))], (255, 60, 170), 1.0),
+    # gold: a white-hot yellow edge, gold, chartreuse, green, fading to deep rose
+    ([(0.0, (255, 255, 210)), (0.2, (255, 225, 70)), (0.6, (180, 255, 60)),
+      (1.2, (40, 235, 150)), (1.9, (60, 130, 210)), (2.7, (210, 40, 130))], (255, 70, 200), 1.0),
+    # magenta: a gold edge melting into rose, magenta and deep violet
+    ([(0.0, (255, 235, 120)), (0.22, (255, 150, 120)), (0.6, (255, 70, 190)),
+      (1.2, (205, 60, 255)), (1.9, (100, 70, 255)), (2.7, (40, 120, 255))], (255, 200, 80), 1.35),
+    # icy: a mint-white edge, aqua, cyan and blue, with rose at the very top
+    ([(0.0, (225, 255, 235)), (0.2, (90, 255, 200)), (0.6, (40, 220, 255)),
+      (1.2, (70, 120, 255)), (1.9, (190, 80, 255)), (2.7, (255, 70, 150))], (200, 80, 255), 1.15),
+]
+HUES, LEVELS, TOP = 64, 56, 2.7     # steps around the palettes and up a curtain
+
+
+def _aurora_table():
+    """[hue step][height step] -> color, blending neighbouring palettes, and
+    [hue step] -> fringe color."""
+    n = len(AURORA)
+    table, fringe = [], []
+    for k in range(HUES):
+        pos = k / HUES * n
+        a, b = AURORA[int(pos)], AURORA[(int(pos) + 1) % n]
+        m = pos - int(pos)
+        m = m * m * (3 - 2 * m)                       # linger on each palette
+        k = a[2] + (b[2] - a[2]) * m
+        table.append([scale(lerp(ramp(a[0], j / LEVELS * TOP), ramp(b[0], j / LEVELS * TOP), m), k)
+                      for j in range(LEVELS)])
+        fringe.append(scale(lerp(a[1], b[1], m), k))
+    return table, fringe
+
+
+AURORA_COLORS, AURORA_FRINGE = _aurora_table()
+
+
 class NorthernLights:
     name = "Northern Lights"
-    # curtains: (base height 0-1, wave size, waves across, speed, height, brightness)
-    CURTAINS = [(0.50, 0.07, 1.1, 0.07, 0.30, 1.0),
-                (0.36, 0.05, 1.7, -0.05, 0.22, 0.7),
-                (0.60, 0.04, 2.4, 0.09, 0.16, 0.55)]
+    # curtains: (base height 0-1, wave size, waves across, speed, height,
+    # brightness, where it starts in the palettes)
+    CURTAINS = [(0.24, 0.05, 0.8, -0.03, 0.15, 0.4, 0.1),      # a faint high veil
+                (0.50, 0.07, 1.1, 0.07, 0.30, 1.0, 0.0),
+                (0.36, 0.05, 1.7, -0.05, 0.22, 0.75, 0.05),
+                (0.60, 0.04, 2.4, 0.09, 0.16, 0.6, -0.05)]
 
     def __init__(self):
         self.stars = Stars(150, brightness=0.85, meteors=0.008)
@@ -876,10 +921,21 @@ class NorthernLights:
         tex = noise_texture(seed=29, cells=9, octaves=3)
         br, bg, bb, chs, fgs = cv.br, cv.bg, cv.bb, cv.ch, cv.fg
         exp, sin = math.exp, math.sin
-        GREEN, TEAL, PURPLE, PINK = (40, 255, 130), (40, 210, 200), (170, 70, 255), (255, 70, 150)
+        table, fringes, per_level = AURORA_COLORS, AURORA_FRINGE, LEVELS / TOP
 
-        # the aurora: wavy curtains with bright bottom edges and rays going up
-        for c, (base, amp, waves, speed, height, power) in enumerate(self.CURTAINS):
+        # a soft glow low over the horizon, shifting between rose and teal
+        for y in range(max(0, int(hz - h * 0.4)), hz):
+            fall = exp(-(hz - y) / (h * 0.1)) * 0.4
+            row = y * w
+            for x in range(w):
+                s = 0.5 + 0.5 * sin(x / w * 3.4 + t * 0.03)
+                br[row + x] += (60 - 52 * s) * fall
+                bg[row + x] += (6 + 40 * s) * fall
+                bb[row + x] += (62 - 10 * s) * fall
+
+        # the aurora: wavy curtains with bright bottom edges and rays going up,
+        # their colors drifting slowly through the palettes along the sky
+        for c, (base, amp, waves, speed, height, power, hue0) in enumerate(self.CURTAINS):
             H = h * height
             for x in range(w):
                 u = x / w
@@ -887,26 +943,31 @@ class NorthernLights:
                                            + 1.5 * sin(u * 3 + t * speed * 3 + c)))
                 ray = sample(tex, u * 5 + c * 0.3 + t * 0.004, t * 0.01 + c * 0.37)
                 fold = 0.5 + 0.5 * sin(u * 11 + t * speed * 9 + c * 2)
-                strength = power * (0.25 + 0.75 * fold) * (0.35 + 1.1 * ray ** 2)
+                shimmer = 0.82 + 0.18 * sin(u * 37 - t * 2.1 + c * 3)   # ripples running along
+                strength = power * (0.25 + 0.75 * fold) * (0.35 + 1.1 * ray ** 2) * shimmer
                 if strength < 0.05:
                     continue
-                top = max(0, int(yb - H * 2.6))
+                # the color depends mostly on where it is across the sky, so
+                # curtains crossing each other agree instead of turning muddy
+                hue = int((hue0 + 0.55 * u + 0.08 * sin(u * 2.7 + t * 0.07 + c * 1.7)
+                           + t * 0.004) % 1.0 * HUES) % HUES
+                colors, pink = table[hue], fringes[hue]
+                top = max(0, int(yb - H * TOP))
                 for y in range(top, min(hz, int(yb) + 3)):
                     dy = yb - y                       # rows above the bottom edge
                     if dy >= 0:
-                        a = exp(-dy / H) * min(1.0, 0.35 + dy * 0.9)
-                        col = (lerp(GREEN, TEAL, dy / H) if dy < H
-                               else lerp(TEAL, PURPLE, min(1.0, (dy - H) / H)))
+                        a = (exp(-dy / H) * min(1.0, 0.55 + dy * 0.6)) ** 1.25 + 0.45 * exp(-dy * 1.3)
+                        col = colors[min(LEVELS - 1, int(dy / H * per_level))]
                     else:
-                        a = exp(dy * 1.6) * 0.3 * strength   # faint pink fringe below
-                        col = PINK
+                        a = exp(dy * 1.6) * 0.4 * strength    # a soft fringe below
+                        col = pink
                     a *= strength
                     if a < 0.03:
                         continue
                     i = y * w + x
-                    br[i] += col[0] * a * 0.55
-                    bg[i] += col[1] * a * 0.55
-                    bb[i] += col[2] * a * 0.55
+                    br[i] += col[0] * a * 0.8
+                    bg[i] += col[1] * a * 0.8
+                    bb[i] += col[2] * a * 0.8
                     if a > 0.36 and ray > 0.58 and dy > 0:
                         chs[i] = "|" if a > 0.55 else "'"
                         k = 0.55 + 0.6 * a
