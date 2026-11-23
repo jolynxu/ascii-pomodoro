@@ -9,8 +9,7 @@
     orbit      low Earth orbit: city lights, aurora, a satellite, a Starlink train
     pulsar     a spinning neutron star sweeping lighthouse beams
     comet      a comet with a blue ion tail and a curved dust tail
-    aurora     the northern lights over mountains and a still lake
-    nebula     the Eagle Nebula's Pillars of Creation, glowing where starlight hits them
+    aurora     the northern lights in green, gold and magenta over mountains and a lake
 """
 
 import math
@@ -836,12 +835,57 @@ class Comet:
 
 # ---------------------------------------------------------------- 10. northern lights
 
+# Aurora colors from the bright bottom edge of a curtain (0) up through it
+# (1 = one curtain height; the rays reach about 2.7), plus the thin fringe
+# that glows just under the edge. The palettes melt into one another across
+# the sky, in this order and back round to the start, so the lights pass
+# from green to gold to magenta to icy blue and back again. The last number
+# brightens the palettes that would otherwise look dimmer than green.
+AURORA = [
+    # classic: a pale gold edge, vivid green, cyan, then violet and magenta tops
+    ([(0.0, (255, 245, 170)), (0.18, (150, 255, 90)), (0.55, (40, 255, 140)),
+      (1.1, (30, 205, 225)), (1.8, (130, 80, 255)), (2.7, (255, 50, 200))], (255, 60, 170), 1.0),
+    # gold: a white-hot yellow edge, gold, chartreuse, green, fading to deep rose
+    ([(0.0, (255, 255, 210)), (0.2, (255, 225, 70)), (0.6, (180, 255, 60)),
+      (1.2, (40, 235, 150)), (1.9, (60, 130, 210)), (2.7, (210, 40, 130))], (255, 70, 200), 1.0),
+    # magenta: a gold edge melting into rose, magenta and deep violet
+    ([(0.0, (255, 235, 120)), (0.22, (255, 150, 120)), (0.6, (255, 70, 190)),
+      (1.2, (205, 60, 255)), (1.9, (100, 70, 255)), (2.7, (40, 120, 255))], (255, 200, 80), 1.35),
+    # icy: a mint-white edge, aqua, cyan and blue, with rose at the very top
+    ([(0.0, (225, 255, 235)), (0.2, (90, 255, 200)), (0.6, (40, 220, 255)),
+      (1.2, (70, 120, 255)), (1.9, (190, 80, 255)), (2.7, (255, 70, 150))], (200, 80, 255), 1.15),
+]
+HUES, LEVELS, TOP = 64, 56, 2.7     # steps around the palettes and up a curtain
+
+
+def _aurora_table():
+    """[hue step][height step] -> color, blending neighbouring palettes, and
+    [hue step] -> fringe color."""
+    n = len(AURORA)
+    table, fringe = [], []
+    for k in range(HUES):
+        pos = k / HUES * n
+        a, b = AURORA[int(pos)], AURORA[(int(pos) + 1) % n]
+        m = pos - int(pos)
+        m = m * m * (3 - 2 * m)                       # linger on each palette
+        k = a[2] + (b[2] - a[2]) * m
+        table.append([scale(lerp(ramp(a[0], j / LEVELS * TOP), ramp(b[0], j / LEVELS * TOP), m), k)
+                      for j in range(LEVELS)])
+        fringe.append(scale(lerp(a[1], b[1], m), k))
+    return table, fringe
+
+
+AURORA_COLORS, AURORA_FRINGE = _aurora_table()
+
+
 class NorthernLights:
     name = "Northern Lights"
-    # curtains: (base height 0-1, wave size, waves across, speed, height, brightness)
-    CURTAINS = [(0.50, 0.07, 1.1, 0.07, 0.30, 1.0),
-                (0.36, 0.05, 1.7, -0.05, 0.22, 0.7),
-                (0.60, 0.04, 2.4, 0.09, 0.16, 0.55)]
+    # curtains: (base height 0-1, wave size, waves across, speed, height,
+    # brightness, where it starts in the palettes)
+    CURTAINS = [(0.24, 0.05, 0.8, -0.03, 0.15, 0.4, 0.1),      # a faint high veil
+                (0.50, 0.07, 1.1, 0.07, 0.30, 1.0, 0.0),
+                (0.36, 0.05, 1.7, -0.05, 0.22, 0.75, 0.05),
+                (0.60, 0.04, 2.4, 0.09, 0.16, 0.6, -0.05)]
 
     def __init__(self):
         self.stars = Stars(150, brightness=0.85, meteors=0.008)
@@ -877,10 +921,21 @@ class NorthernLights:
         tex = noise_texture(seed=29, cells=9, octaves=3)
         br, bg, bb, chs, fgs = cv.br, cv.bg, cv.bb, cv.ch, cv.fg
         exp, sin = math.exp, math.sin
-        GREEN, TEAL, PURPLE, PINK = (40, 255, 130), (40, 210, 200), (170, 70, 255), (255, 70, 150)
+        table, fringes, per_level = AURORA_COLORS, AURORA_FRINGE, LEVELS / TOP
 
-        # the aurora: wavy curtains with bright bottom edges and rays going up
-        for c, (base, amp, waves, speed, height, power) in enumerate(self.CURTAINS):
+        # a soft glow low over the horizon, shifting between rose and teal
+        for y in range(max(0, int(hz - h * 0.4)), hz):
+            fall = exp(-(hz - y) / (h * 0.1)) * 0.4
+            row = y * w
+            for x in range(w):
+                s = 0.5 + 0.5 * sin(x / w * 3.4 + t * 0.03)
+                br[row + x] += (60 - 52 * s) * fall
+                bg[row + x] += (6 + 40 * s) * fall
+                bb[row + x] += (62 - 10 * s) * fall
+
+        # the aurora: wavy curtains with bright bottom edges and rays going up,
+        # their colors drifting slowly through the palettes along the sky
+        for c, (base, amp, waves, speed, height, power, hue0) in enumerate(self.CURTAINS):
             H = h * height
             for x in range(w):
                 u = x / w
@@ -888,26 +943,31 @@ class NorthernLights:
                                            + 1.5 * sin(u * 3 + t * speed * 3 + c)))
                 ray = sample(tex, u * 5 + c * 0.3 + t * 0.004, t * 0.01 + c * 0.37)
                 fold = 0.5 + 0.5 * sin(u * 11 + t * speed * 9 + c * 2)
-                strength = power * (0.25 + 0.75 * fold) * (0.35 + 1.1 * ray ** 2)
+                shimmer = 0.82 + 0.18 * sin(u * 37 - t * 2.1 + c * 3)   # ripples running along
+                strength = power * (0.25 + 0.75 * fold) * (0.35 + 1.1 * ray ** 2) * shimmer
                 if strength < 0.05:
                     continue
-                top = max(0, int(yb - H * 2.6))
+                # the color depends mostly on where it is across the sky, so
+                # curtains crossing each other agree instead of turning muddy
+                hue = int((hue0 + 0.55 * u + 0.08 * sin(u * 2.7 + t * 0.07 + c * 1.7)
+                           + t * 0.004) % 1.0 * HUES) % HUES
+                colors, pink = table[hue], fringes[hue]
+                top = max(0, int(yb - H * TOP))
                 for y in range(top, min(hz, int(yb) + 3)):
                     dy = yb - y                       # rows above the bottom edge
                     if dy >= 0:
-                        a = exp(-dy / H) * min(1.0, 0.35 + dy * 0.9)
-                        col = (lerp(GREEN, TEAL, dy / H) if dy < H
-                               else lerp(TEAL, PURPLE, min(1.0, (dy - H) / H)))
+                        a = (exp(-dy / H) * min(1.0, 0.55 + dy * 0.6)) ** 1.25 + 0.45 * exp(-dy * 1.3)
+                        col = colors[min(LEVELS - 1, int(dy / H * per_level))]
                     else:
-                        a = exp(dy * 1.6) * 0.3 * strength   # faint pink fringe below
-                        col = PINK
+                        a = exp(dy * 1.6) * 0.4 * strength    # a soft fringe below
+                        col = pink
                     a *= strength
                     if a < 0.03:
                         continue
                     i = y * w + x
-                    br[i] += col[0] * a * 0.55
-                    bg[i] += col[1] * a * 0.55
-                    bb[i] += col[2] * a * 0.55
+                    br[i] += col[0] * a * 0.8
+                    bg[i] += col[1] * a * 0.8
+                    bb[i] += col[2] * a * 0.8
                     if a > 0.36 and ray > 0.58 and dy > 0:
                         chs[i] = "|" if a > 0.55 else "'"
                         k = 0.55 + 0.6 * a
@@ -964,273 +1024,6 @@ class NorthernLights:
                     chs[i] = " "
 
 
-# ---------------------------------------------------------------- 11. eagle nebula
-
-# Glowing gas, from hot and blue near the young stars out to gold and
-# magenta far away (roughly the Hubble colors, pushed further).
-NEBULA = [(0.0, (190, 250, 255)), (0.12, (70, 215, 220)), (0.27, (40, 140, 215)),
-          (0.42, (85, 70, 190)), (0.56, (175, 60, 175)), (0.7, (240, 85, 120)),
-          (0.84, (250, 140, 60)), (1.0, (255, 205, 90))]
-# The edges of the pillars, where starlight is boiling them away.
-RIM = [(0.0, (255, 120, 70)), (0.3, (255, 190, 90)), (0.55, (255, 240, 200)),
-       (0.75, (255, 140, 200)), (1.0, (140, 230, 255))]
-
-
-class EagleNebula:
-    """The Pillars of Creation: three towers of cold dust and gas, lit from
-    above by a cluster of young stars that is slowly blowing them away."""
-    name = "Eagle Nebula"
-    # (x, top, base radius, top radius, lean, head size, wiggle phase): sizes
-    # are fractions of the screen height, x is a fraction of the width
-    PILLARS = [(0.20, 0.13, 0.21, 0.075, 0.10, 0.045, 0.3),
-               (0.52, 0.40, 0.15, 0.06, -0.03, 0.035, 2.1),
-               (0.80, 0.60, 0.10, 0.045, 0.06, 0.025, 4.0)]
-
-    def __init__(self):
-        self.stars = Stars(120, brightness=0.7, meteors=0.006)
-        self.size = None
-        self.streamers = []   # gas boiling off the pillar edges [x, y, dx, dy, life, max, hue]
-        self.sparkles = []    # [x, y, life, color]
-
-    # -------------------------------------------------------- set up per size
-
-    def _prepare(self, w, h):
-        self.size = (w, h)
-        n = w * h
-        rough = noise_texture(seed=23, cells=10, octaves=4)
-        gas = noise_texture(seed=21, cells=5, octaves=5)
-        hue = noise_texture(seed=22, cells=4, octaves=3)
-        self.light = lx, ly = w * 0.66, -h * 0.12          # the young star cluster
-
-        # each pillar is a chain of soft circles running up a wavy centre line
-        F = [0.0] * n
-        heads = []
-        for x0, top, rb, rt, lean, head, ph in self.PILLARS:
-            bx, by, ty = x0 * w / ASPECT, h + 3.0, top * h
-            for k in range(81):
-                s = k / 80
-                cy = by + (ty - by) * s
-                cx = bx + lean * h * s + 0.025 * h * math.sin(s * 6 + ph)
-                r = (rb + (rt - rb) * s ** 0.7) * h + head * h * math.exp(-((s - 0.92) / 0.06) ** 2)
-                r = max(1.0, r)
-                for y in range(max(0, int(cy - r)), min(h, int(cy + r) + 2)):
-                    for x in range(max(0, int((cx - r) * ASPECT)), min(w, int((cx + r) * ASPECT) + 2)):
-                        f = 1 - math.hypot(x / ASPECT - cx, y - cy) / r
-                        i = y * w + x
-                        if f > F[i]:
-                            F[i] = f
-            heads.append((cx * ASPECT, cy, r))
-
-        # ragged edges, then how solid each cell is
-        A = [0.0] * n
-        for y in range(h):
-            for x in range(w):
-                i = y * w + x
-                if F[i] <= 0:
-                    continue
-                edge = min(1.0, F[i] * 5)                 # only roughen near the pillars
-                v = (F[i] * 2.6 + edge * ((sample(rough, x / w * 4, y / h * 3) - 0.5) * 1.5
-                     + (sample(gas, x / w * 9, y / h * 6) - 0.5) * 0.6) - 0.35)
-                A[i] = 0.0 if v <= 0 else 1.0 if v >= 1 else v * v * (3 - 2 * v)
-
-        def a_at(x, y):
-            if 0 <= x < w and 0 <= y < h:
-                return A[y * w + x]
-            return 0.0
-
-        # rims face the light (up and to the right); a halo spills off them
-        rim = [0.0] * n
-        for y in range(h):
-            for x in range(w):
-                a = A[y * w + x]
-                if a > 0.05:
-                    toward = (a_at(x + 1, y - 1) + a_at(x, y - 1) + a_at(x + 2, y - 2) + a_at(x + 3, y - 1)) / 4
-                    rim[y * w + x] = min(1.0, a * (1 - toward) * 1.8)
-        halo = [0.0] * n
-        for y in range(h):
-            for x in range(w):
-                r = rim[y * w + x]
-                if r > 0.15:
-                    for dy in range(-2, 2):
-                        for dx in range(-3, 4):
-                            xx, yy = x + dx, y + dy
-                            if 0 <= xx < w and 0 <= yy < h:
-                                k = r * (1 - abs(dx) / 4) * (1 - abs(dy + 0.5) / 2.5) * 0.35
-                                j = yy * w + xx
-                                if k > halo[j]:
-                                    halo[j] = k
-
-        # the gas: color by distance from the stars, wobbled by noise
-        self.cells = cells = []
-        for y in range(h):
-            for x in range(w):
-                i = y * w + x
-                u, v = x / w, y / h
-                d = math.hypot((x - lx) / ASPECT, y - ly) / h
-                hv = sample(hue, u * 1.3, v * 1.1)
-                g = sample(gas, u * 1.6, v * 1.4)
-                p = max(0.0, min(1.0, 0.05 + d * 0.62 + (hv - 0.5) * 0.7))
-                ca = ramp(NEBULA, p)
-                cb = ramp(NEBULA, min(1.0, p + 0.2 + 0.15 * hv))     # the color it drifts toward
-                bright = (0.12 + 0.95 * g ** 1.6) * (1.25 - 0.55 * min(1.0, d))
-                tex = sample(rough, u * 7, v * 5)
-                body = lerp((26, 10, 12), (105, 48, 30), tex * 0.8 + 0.2 * (1 - v))
-                rc = ramp(RIM, sample(hue, u * 3 + 0.4, v * 2))
-                cells.append((x, y, u, v, d, ca, cb, bright, hv * TAU, A[i], rim[i], halo[i],
-                              body, rc, tex))
-
-        # protostars glowing inside the pillar heads, and where gas boils off
-        self.protostars = [(hx - rr * 0.15 * ASPECT, hy + rr * 0.9, k) for k, (hx, hy, rr) in enumerate(heads)]
-        self.tips = heads
-        self.jet = heads[0]
-        self.rims = [(x, y) for y in range(h) for x in range(w)
-                     if rim[y * w + x] > 0.5 and y < h * 0.85]
-        rnd = random.Random(7)
-        self.bright_stars = []
-        for _ in range(max(6, w // 14)):
-            x, y = rnd.uniform(0, w), rnd.uniform(0, h * 0.9)
-            if A[int(y) * w + int(x)] < 0.1:
-                self.bright_stars.append((x, y, rnd.uniform(0.5, 1.0), rnd.uniform(0, TAU),
-                                          rnd.choice(((200, 225, 255), (255, 240, 220), (255, 200, 150),
-                                                      (170, 200, 255), (255, 170, 210)))))
-
-    # -------------------------------------------------------- every frame
-
-    def draw(self, cv, t):
-        w, h = cv.w, cv.h
-        if self.size != (w, h):
-            self._prepare(w, h)
-            self.streamers, self.sparkles = [], []
-        space_gradient(cv, (2, 2, 10), (5, 2, 12))
-        drift = noise_texture(seed=24, cells=6, octaves=3)
-        shim = noise_texture(seed=25, cells=12, octaves=3)
-        sin, exp = math.sin, math.exp
-        lx, ly = self.light
-        wave_r = (t % 16) / 16 * 2.2                       # a ring of light rolling out from the stars
-        ox, oy = t * 0.006, t * 0.0025
-        sx, sy = -t * 0.02, t * 0.008
-        br, bg, bb, chs, fgs = cv.br, cv.bg, cv.bb, cv.ch, cv.fg
-        RAMPC = " .·:-=+*"
-        for (x, y, u, v, d, ca, cb, bright, ph, a, rim, halo, body, rc, tex) in self.cells:
-            i = y * w + x
-            m = drift[int((v * 1.3 + oy) * 96) % 96][int((u * 1.3 + ox) * 192) % 192]
-            k = 0.5 + 0.5 * sin(t * 0.12 + ph)
-            wave = exp(-((d - wave_r) / 0.07) ** 2)
-            gb = bright * (0.45 + 1.1 * m) + 0.35 * wave * bright
-            r = (ca[0] + (cb[0] - ca[0]) * k) * gb
-            g = (ca[1] + (cb[1] - ca[1]) * k) * gb
-            b = (ca[2] + (cb[2] - ca[2]) * k) * gb
-            if a > 0.01:                                   # a pillar in front of the gas
-                s = shim[int((v * 4 + sy) * 96) % 96][int((u * 4 + sx) * 192) % 192]
-                glow = rim * (0.55 + 0.9 * s) + 0.6 * wave * rim
-                r = r * (1 - a) * 0.5 + body[0] * a + rc[0] * glow
-                g = g * (1 - a) * 0.5 + body[1] * a + rc[1] * glow
-                b = b * (1 - a) * 0.5 + body[2] * a + rc[2] * glow
-                br[i], bg[i], bb[i] = r * 0.8, g * 0.8, b * 0.8
-                if glow > 0.35:
-                    chs[i] = "▓" if glow > 0.8 else "▒"
-                    fgs[i] = pack((min(255, rc[0] * glow * 1.25 + 40), min(255, rc[1] * glow * 1.25 + 30),
-                                   min(255, rc[2] * glow * 1.25 + 30)))
-                elif a > 0.5:
-                    chs[i] = "░" if tex > 0.45 else "▒" if tex > 0.3 else " "
-                    fgs[i] = pack((body[0] * 1.6 + 10, body[1] * 1.6 + 6, body[2] * 1.6 + 6))
-                continue
-            if halo > 0.01:                                 # light spilling off the rims
-                s = shim[int((v * 4 + sy) * 96) % 96][int((u * 4 + sx) * 192) % 192]
-                hk = halo * (0.6 + 0.8 * s)
-                r, g, b = r + rc[0] * hk, g + rc[1] * hk, b + rc[2] * hk
-            br[i], bg[i], bb[i] = r * 0.42, g * 0.42, b * 0.42
-            lvl = int(gb * 0.75 * len(RAMPC))
-            if lvl > 1:
-                chs[i] = RAMPC[min(len(RAMPC) - 1, lvl)]
-                fgs[i] = pack((min(255, r * 0.75), min(255, g * 0.75), min(255, b * 0.75)))
-
-        self.stars.draw(cv, t)
-        cv.glow(lx, ly, (180, 230, 255), h * 0.55, 0.25)    # glare from the cluster
-        cv.glow(lx, ly, (255, 255, 255), h * 0.2, 0.4)
-        for k, (hx, hy, rr) in enumerate(self.tips):         # the pillar tips blaze brightest
-            p = 0.75 + 0.25 * math.sin(t * 0.7 + k * 1.9)
-            cv.glow(hx + rr * 0.4 * ASPECT, hy - rr * 0.6, (255, 210, 150), rr * 1.3, 0.3 * p)
-            cv.glow(hx + rr * 0.4 * ASPECT, hy - rr * 0.6, (255, 140, 210), rr * 2.4, 0.12 * p)
-        self._bright_stars(cv, t)
-        self._protostars(cv, t)
-        self._streamers(cv, t)
-        self._sparkles(cv)
-
-    def _bright_stars(self, cv, t):
-        """Big stars with long diffraction spikes that pulse gently."""
-        for x, y, mag, ph, col in self.bright_stars:
-            tw = 0.75 + 0.25 * math.sin(t * 1.7 + ph)
-            L = int((3 + 7 * mag) * tw)
-            for k in range(1, L + 1):
-                f = (1 - k / (L + 1)) ** 1.5 * mag * tw
-                c = scale(col, f)
-                cv.put(x - k, y, "─", c)
-                cv.put(x + k, y, "─", c)
-                if k <= L // 2:
-                    cv.put(x, y - k, "│", c)
-                    cv.put(x, y + k, "│", c)
-                if mag > 0.8 and k <= L // 3:
-                    cv.put(x + k * 1.2, y - k * 0.6, "╱", scale(c, 0.6))
-                    cv.put(x - k * 1.2, y + k * 0.6, "╱", scale(c, 0.6))
-                    cv.put(x + k * 1.2, y + k * 0.6, "╲", scale(c, 0.6))
-                    cv.put(x - k * 1.2, y - k * 0.6, "╲", scale(c, 0.6))
-            cv.put(x, y, "✦", lerp(col, (255, 255, 255), 0.6))
-            cv.glow(x, y, col, 1.5 + 2.5 * mag, 0.55 * tw * mag)
-
-    def _protostars(self, cv, t):
-        """Baby stars hidden in the pillar heads, and a jet from one of them."""
-        for x, y, k in self.protostars:
-            p = 0.6 + 0.4 * math.sin(t * (0.9 + 0.3 * k) + k * 2)
-            cv.glow(x, y, (255, 30, 40), 2.8, 0.6 * p)
-            cv.glow(x, y, (255, 120, 60), 1, 0.4 * p)
-            cv.put(x, y, "*", lerp((255, 90, 70), (255, 220, 180), p))
-        x, y, k = self.protostars[0]                       # a Herbig-Haro jet, both ways
-        ang = -0.5
-        for side in (-1, 1):
-            for j in range(1, 13):
-                q = (t * 0.6 - j / 12) % 1.0
-                knot = math.exp(-((q - 0.5) / 0.12) ** 2)
-                c = lerp((160, 60, 255), (120, 255, 255), j / 12)
-                px = x + side * math.cos(ang) * j * 1.6
-                py = y + side * math.sin(ang) * j * 0.8
-                cv.put(px, py, "•" if knot > 0.6 else "·", scale(c, 0.35 + 0.65 * knot))
-                if knot > 0.6:
-                    cv.glow(px, py, c, 1.2, 0.35 * knot)
-
-    def _streamers(self, cv, t):
-        """Gas boiling off the lit edges of the pillars and drifting away."""
-        if self.rims and len(self.streamers) < 140:
-            for _ in range(3):
-                x, y = random.choice(self.rims)
-                life = random.randint(30, 80)
-                self.streamers.append([x, y, random.uniform(0.02, 0.15), random.uniform(-0.18, -0.08),
-                                       life, life, random.random()])
-        for s in self.streamers:
-            s[0] += s[2]
-            s[1] += s[3]
-            s[4] -= 1
-            f = s[4] / s[5]
-            c = lerp(ramp(RIM, s[6]), (120, 220, 255), 1 - f)
-            fade = math.sin(f * math.pi)
-            cv.put(s[0], s[1], "˙" if f < 0.4 else "·" if f < 0.8 else "•", scale(c, fade))
-            cv.add_bg(int(s[0] + 0.5), int(s[1] + 0.5), scale(c, 0.15 * fade))
-        self.streamers = [s for s in self.streamers if s[4] > 0]
-
-    def _sparkles(self, cv):
-        """Now and then a new star flickers into view somewhere in the gas."""
-        if random.random() < 0.05:
-            self.sparkles.append([random.uniform(0, cv.w), random.uniform(0, cv.h), 24,
-                                  random.choice(((150, 230, 255), (255, 160, 220), (255, 230, 150),
-                                                 (180, 255, 200)))])
-        for s in self.sparkles:
-            s[2] -= 1
-            f = math.sin(s[2] / 24 * math.pi)
-            cv.put(s[0], s[1], "✦" if f > 0.6 else "+" if f > 0.3 else "·", scale(s[3], 0.4 + 0.6 * f))
-            cv.glow(s[0], s[1], s[3], 1.8, 0.5 * f)
-        self.sparkles = [s for s in self.sparkles if s[2] > 0]
-
-
 SCENES = {
     "planet": RingedPlanet,
     "constellations": Constellations,
@@ -1242,5 +1035,4 @@ SCENES = {
     "pulsar": Pulsar,
     "comet": Comet,
     "aurora": NorthernLights,
-    "nebula": EagleNebula,
 }
